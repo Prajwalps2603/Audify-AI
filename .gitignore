@@ -1,0 +1,52 @@
+# TeleCaller AI — Root .gitignore
+
+# Environment secrets — NEVER commit
+.env
+.env.local
+.env.production
+
+# ─── Mobile ──────────────────────────────────────────────────────
+mobile/node_modules/
+mobile/.expo/
+mobile/.gradle/
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/local.properties
+mobile/ios/build/
+mobile/ios/Pods/
+mobile/ios/*.xcworkspace/xcuserdata/
+mobile/.bundle/vendor/
+
+# React Native
+*.jsbundle
+.metro-health-check*
+
+# ─── Server ──────────────────────────────────────────────────────
+server/node_modules/
+server/dist/
+server/*.log
+
+# ─── General ─────────────────────────────────────────────────────
+node_modules/
+*.log
+*.lock
+.DS_Store
+Thumbs.db
+.vscode/settings.json
+*.keystore
+!debug.keystore
+
+# Google service account keys — never commit
+google-service-account.json
+service-account-key.json
+credentials.json
+
+# Scratch scripts & temporary build outputs
+mobile/android/app/.cxx/
+mobile/android/.cxx/
+phone_screen.png
+*.png
+mobile/patch-*.js
+mobile/patch-*.py
+
