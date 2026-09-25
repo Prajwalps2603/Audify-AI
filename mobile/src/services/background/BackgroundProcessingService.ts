@@ -1,4 +1,4 @@
-// TeleCaller AI — Background Processing & Automation Service (Phase 12)
+// TeleCaller AI — Background Processing & Automation Service
 // Coordinates background monitoring, periodic scan watchdogs,
 // Android Foreground Service execution, and automatic pipeline triggers.
 
@@ -189,7 +189,7 @@ export class BackgroundProcessingService {
     if (Platform.OS === 'android' && BackgroundServiceModule?.startForegroundService) {
       try {
         await BackgroundServiceModule.startForegroundService(
-          'TeleCaller AI Background Monitor',
+          'Audify AI Background Monitor',
           'Actively monitoring call recordings & auto-processing in background',
         );
       } catch (err) {

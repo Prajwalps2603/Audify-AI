@@ -1,4 +1,4 @@
-// TeleCaller AI — Privacy & Consent Modal (Phase 14)
+// TeleCaller AI — Privacy & User Consent Modal
 // Provides full transparency on data architecture, zero-data-selling pledge,
 // least-privilege OAuth scopes, and local-first audio privacy.
 
@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {Colors, FontSize, BorderRadius, Spacing, Shadow} from '../../theme';
 
 interface PrivacyConsentModalProps {
@@ -43,7 +44,7 @@ export const PrivacyConsentModal: React.FC<PrivacyConsentModalProps> = ({
               style={styles.closeButton}
               onPress={onClose}
               hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
-              <Text style={styles.closeButtonText}>✕</Text>
+              <Icon name="close" size={20} color={Colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
@@ -53,7 +54,7 @@ export const PrivacyConsentModal: React.FC<PrivacyConsentModalProps> = ({
             showsVerticalScrollIndicator={false}>
             {/* Top Badge */}
             <View style={styles.guaranteeBanner}>
-              <Text style={styles.guaranteeIcon}>🛡️</Text>
+              <Icon name="shield-check" size={28} color="#166534" style={{marginRight: Spacing.sm, marginTop: 2}} />
               <View style={styles.guaranteeTextContainer}>
                 <Text style={styles.guaranteeTitle}>Zero Data Selling Pledge</Text>
                 <Text style={styles.guaranteeDescription}>
@@ -67,7 +68,7 @@ export const PrivacyConsentModal: React.FC<PrivacyConsentModalProps> = ({
             {/* Principle 1 */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionIcon}>📱</Text>
+                <Icon name="cellphone" size={20} color={Colors.primary} style={styles.sectionIcon} />
                 <Text style={styles.sectionTitle}>Local-First Storage & Scoped Sandbox</Text>
               </View>
               <Text style={styles.sectionBody}>
@@ -82,7 +83,7 @@ export const PrivacyConsentModal: React.FC<PrivacyConsentModalProps> = ({
             {/* Principle 2 */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionIcon}>🔐</Text>
+                <Icon name="lock-check" size={20} color="#8B5CF6" style={styles.sectionIcon} />
                 <Text style={styles.sectionTitle}>Hardware KeyStore Encryption</Text>
               </View>
               <Text style={styles.sectionBody}>
@@ -96,7 +97,7 @@ export const PrivacyConsentModal: React.FC<PrivacyConsentModalProps> = ({
             {/* Principle 3 */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionIcon}>🎯</Text>
+                <Icon name="target" size={20} color="#10B981" style={styles.sectionIcon} />
                 <Text style={styles.sectionTitle}>Least-Privilege Google OAuth Scopes</Text>
               </View>
               <Text style={styles.sectionBody}>
@@ -122,7 +123,7 @@ export const PrivacyConsentModal: React.FC<PrivacyConsentModalProps> = ({
             {/* Principle 4 */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionIcon}>🎙️</Text>
+                <Icon name="microphone" size={20} color="#F59E0B" style={styles.sectionIcon} />
                 <Text style={styles.sectionTitle}>AI Speech-to-Text Handling</Text>
               </View>
               <Text style={styles.sectionBody}>
@@ -137,7 +138,7 @@ export const PrivacyConsentModal: React.FC<PrivacyConsentModalProps> = ({
             {/* Principle 5 */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionIcon}>📞</Text>
+                <Icon name="phone-outline" size={20} color="#06B6D4" style={styles.sectionIcon} />
                 <Text style={styles.sectionTitle}>Call Log & Contact Permissions</Text>
               </View>
               <Text style={styles.sectionBody}>
@@ -150,7 +151,7 @@ export const PrivacyConsentModal: React.FC<PrivacyConsentModalProps> = ({
             {/* Principle 6 */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionIcon}>🗑️</Text>
+                <Icon name="delete-outline" size={20} color={Colors.error} style={styles.sectionIcon} />
                 <Text style={styles.sectionTitle}>Data Revocation & Purge</Text>
               </View>
               <Text style={styles.sectionBody}>
@@ -195,6 +196,9 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: BorderRadius.xl,
+    borderTopRightRadius: BorderRadius.xl,
   },
   title: {
     fontSize: FontSize.lg,
@@ -210,14 +214,9 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: Colors.border,
+    backgroundColor: Colors.surfaceSecondary,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  closeButtonText: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    fontWeight: '600',
   },
   scrollContent: {
     flex: 1,
@@ -234,11 +233,6 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     padding: Spacing.md,
     alignItems: 'flex-start',
-  },
-  guaranteeIcon: {
-    fontSize: 24,
-    marginRight: Spacing.sm,
-    marginTop: 2,
   },
   guaranteeTextContainer: {
     flex: 1,
@@ -268,7 +262,6 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   sectionIcon: {
-    fontSize: 18,
     marginRight: Spacing.xs,
   },
   sectionTitle: {

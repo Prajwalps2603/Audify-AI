@@ -1,10 +1,5 @@
-// TeleCaller AI — Transcript Screen (Phase 10: Real Data Integration)
-// Full conversational transcript interface with:
-// - Real audio player synchronization & interactive scrubbing
-// - Active speaker highlighting & auto-scroll
-// - In-transcript search & keyword filtering
-// - Formatted transcript export & sharing
-// - Real data integration across discovered & mock calls
+// TeleCaller AI — Transcript Screen
+// Conversational transcript interface with synchronized audio scrubber, speaker highlighting, and text search.
 
 import React, {useMemo, useRef, useState, useEffect} from 'react';
 import {
@@ -17,14 +12,15 @@ import {
   Dimensions,
   ListRenderItem,
   ActivityIndicator,
-  Alert,
   TextInput,
   Share,
+  Modal,
+  ScrollView as RNScrollView,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {useNavigation, useRoute} from '@react-navigation/native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {Colors, FontSize, BorderRadius, Shadow, Spacing} from '../../theme';
-import {MOCK_CALLS} from '../../mock/mockData';
 import {TranscriptSegment, SpeakerRole} from '../../types';
 import Avatar from '../../components/Avatar';
 import {useRecordings} from '../../context/RecordingContext';
@@ -33,6 +29,8 @@ import {AudioPlayerService} from '../../services/audio/AudioPlayerService';
 import {TranscriptionService} from '../../services/transcription/TranscriptionService';
 import {SUPPORTED_PROVIDERS, SpeechProvider} from '../../types/transcription';
 import {useAudioPlayer} from '../../hooks/useAudioPlayer';
+import {toast} from '../../components/Toast';
+import {showAlert} from '../../components/AppModal';
 
 const {width} = Dimensions.get('window');
 const BUBBLE_MAX_WIDTH = width * 0.72;
@@ -105,7 +103,7 @@ const MessageBubble: React.FC<BubbleProps> = ({
         isReceiver ? styles.bubbleRowRight : styles.bubbleRowLeft,
       ]}>
       {!isReceiver && (
-        <Avatar name="TC" size={32} style={styles.bubbleAvatar} />
+        <Avatar name="Agent" size={32} style={styles.bubbleAvatar} />
       )}
 
       <View style={styles.bubbleColumn}>
@@ -121,24 +119,23 @@ const MessageBubble: React.FC<BubbleProps> = ({
         )}
 
         <TouchableOpacity
-          activeOpacity={onPress ? 0.75 : 1}
+          activeOpacity={0.75}
           onPress={onPress}
           style={[
             styles.bubble,
+            {backgroundColor: bubbleBg, borderColor: bubbleBorder},
             isReceiver ? styles.bubbleRight : styles.bubbleLeft,
             isActive && styles.bubbleActive,
-            {
-              backgroundColor: bubbleBg,
-              borderColor: bubbleBorder,
-            },
-          ]}>
+          ]}
+          accessibilityLabel={`${segment.speakerLabel}: ${segment.text}, at ${segment.timestamp || 'start'}`}
+          accessibilityRole="button">
           {isActive && (
             <View
               style={[
                 styles.activeBadge,
                 {backgroundColor: isReceiver ? Colors.secondary : Colors.primary},
               ]}>
-              <Text style={styles.activeBadgeText}>▶ Speaking Now</Text>
+              <Text style={styles.activeBadgeText}>PLAYING NOW</Text>
             </View>
           )}
 
@@ -147,7 +144,10 @@ const MessageBubble: React.FC<BubbleProps> = ({
           </Text>
 
           <View style={styles.bubbleFooter}>
-            <Text style={styles.tapSeekText}>Tap to play ↗</Text>
+            <View style={styles.tapSeekRow}>
+              <Icon name="play-circle-outline" size={13} color={Colors.primary} style={{marginRight: 3}} />
+              <Text style={styles.tapSeekText}>Tap to seek</Text>
+            </View>
             {segment.timestamp && (
               <Text style={[styles.bubbleTime, {color: timeColor}]}>
                 {segment.timestamp}
@@ -180,8 +180,8 @@ const TranscriptScreen: React.FC = () => {
     if (discovered) {
       return RecordingScannerService.discoveredToCallRecord(discovered);
     }
-    return MOCK_CALLS.find(c => c.id === callId) ?? null;
-  }, [discovered, callId]);
+    return null;
+  }, [discovered]);
 
   const [liveSegments, setLiveSegments] = useState<TranscriptSegment[]>(
     call?.transcript ?? [],
@@ -190,6 +190,22 @@ const TranscriptScreen: React.FC = () => {
   const [transcribeProgress, setTranscribeProgress] = useState(0);
   const [transcribeStatus, setTranscribeStatus] = useState<string>('');
   const [activeProvider, setActiveProvider] = useState<SpeechProvider>('GOOGLE');
+
+  // Language selector state
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('English');
+  const [langModalVisible, setLangModalVisible] = useState(false);
+
+  const LANGUAGE_OPTIONS = [
+    {code: 'English', label: 'English', flag: '🇬🇧'},
+    {code: 'Hindi', label: 'हिंदी (Hindi)', flag: '🇮🇳'},
+    {code: 'Malayalam', label: 'മലയാളം (Malayalam)', flag: '🇮🇳'},
+    {code: 'Tamil', label: 'தமிழ் (Tamil)', flag: '🇮🇳'},
+    {code: 'Telugu', label: 'తెలుగు (Telugu)', flag: '🇮🇳'},
+    {code: 'Kannada', label: 'ಕನ್ನಡ (Kannada)', flag: '🇮🇳'},
+    {code: 'Arabic', label: 'العربية (Arabic)', flag: '🇦🇪'},
+    {code: 'French', label: 'Français (French)', flag: '🇫🇷'},
+    {code: 'Spanish', label: 'Español (Spanish)', flag: '🇪🇸'},
+  ];
 
   // Search & Audio Dock state
   const [searchQuery, setSearchQuery] = useState('');
@@ -257,11 +273,14 @@ const TranscriptScreen: React.FC = () => {
         if (prog.status === 'diarizing') setTranscribeStatus('Diarizing speakers & timestamps...');
       });
       setLiveSegments(result.segments);
+      toast.success('Transcript Ready', 'Speech transcription complete');
     } catch (err: any) {
-      Alert.alert(
-        'Transcription Failed',
-        err?.message || 'Could not transcribe call recording.',
-      );
+      showAlert({
+        title: 'Transcription Failed',
+        message: err?.message || 'Could not transcribe call recording.',
+        variant: 'error',
+        buttons: [{text: 'OK'}],
+      });
     } finally {
       setIsTranscribing(false);
       setTranscribeProgress(0);
@@ -279,10 +298,10 @@ const TranscriptScreen: React.FC = () => {
 
   const handleShareTranscript = async () => {
     if (liveSegments.length === 0) {
-      Alert.alert('Transcript', 'No transcript content to share.');
+      toast.info('Transcript', 'No transcript content to share.');
       return;
     }
-    const header = `📞 TeleCaller AI — Call Transcript\nContact: ${call?.name}\nDate: ${call?.date}\nDuration: ${call?.duration}\nLanguage: ${call?.language}\n\n`;
+    const header = `Audify AI — Call Transcript\nContact: ${call?.name}\nDate: ${call?.date}\nDuration: ${call?.duration}\nLanguage: ${call?.language}\n\n`;
     const body = liveSegments
       .map(
         seg => `[${seg.timestamp || '00:00'}] ${seg.speakerLabel}: ${seg.text}`,
@@ -316,9 +335,13 @@ const TranscriptScreen: React.FC = () => {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.notFound}>
+          <Icon name="file-question-outline" size={56} color={Colors.textTertiary} />
           <Text style={styles.notFoundText}>Call record not found.</Text>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={styles.backLink}>← Go Back</Text>
+          <TouchableOpacity
+            style={styles.backLinkBtn}
+            onPress={() => navigation.goBack()}>
+            <Icon name="arrow-left" size={16} color={Colors.primary} style={{marginRight: 4}} />
+            <Text style={styles.backLink}>Go Back</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -336,7 +359,7 @@ const TranscriptScreen: React.FC = () => {
           onPress={() => navigation.goBack()}
           accessibilityLabel="Go back"
           accessibilityRole="button">
-          <Text style={styles.backIcon}>←</Text>
+          <Icon name="arrow-left" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
 
         <View style={styles.topBarCenter}>
@@ -348,16 +371,29 @@ const TranscriptScreen: React.FC = () => {
           </Text>
         </View>
 
-        <TouchableOpacity
-          style={styles.actionBtn}
-          onPress={handleShareTranscript}
-          accessibilityLabel="Share transcript"
-          accessibilityRole="button">
-          <Text style={styles.actionBtnIcon}>📤</Text>
-        </TouchableOpacity>
+        <View style={styles.topBarActions}>
+          <TouchableOpacity
+            style={styles.actionBtn}
+            onPress={() => setLangModalVisible(true)}
+            accessibilityLabel="Change transcript language"
+            accessibilityRole="button">
+            <Icon name="translate" size={20} color={Colors.primary} />
+            {selectedLanguage !== 'English' && (
+              <View style={styles.langIndicatorDot} />
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.actionBtn}
+            onPress={handleShareTranscript}
+            accessibilityLabel="Share transcript"
+            accessibilityRole="button">
+            <Icon name="share-variant-outline" size={20} color={Colors.primary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* ── Synchronized Audio Dock (Phase 10) ── */}
+      {/* ── Synchronized Audio Dock ── */}
       {call.recordingUri && (
         <View style={styles.audioDock}>
           <TouchableOpacity
@@ -366,15 +402,27 @@ const TranscriptScreen: React.FC = () => {
             activeOpacity={0.8}
             accessibilityLabel={isPlaying ? 'Pause audio' : 'Play audio'}
             accessibilityRole="button">
-            <Text style={styles.dockPlayIcon}>{isPlaying ? '⏸' : '▶'}</Text>
+            <Icon
+              name={isPlaying ? 'pause' : 'play'}
+              size={22}
+              color={Colors.textInverse}
+            />
           </TouchableOpacity>
 
           <View style={styles.dockTrackCol}>
             <View style={styles.dockTimeRow}>
               <Text style={styles.dockTimeText}>{formattedPosition}</Text>
-              <Text style={styles.dockSyncBadge}>
-                {isPlaying ? '● Audio Sync Playing' : 'Tap bubble to jump audio'}
-              </Text>
+              <View style={styles.dockSyncRow}>
+                <Icon
+                  name={isPlaying ? 'record-circle-outline' : 'gesture-tap'}
+                  size={12}
+                  color={isPlaying ? Colors.primary : Colors.textTertiary}
+                  style={{marginRight: 3}}
+                />
+                <Text style={styles.dockSyncBadge}>
+                  {isPlaying ? 'Audio Sync Active' : 'Tap bubble to jump'}
+                </Text>
+              </View>
               <Text style={styles.dockTimeText}>{formattedDuration}</Text>
             </View>
 
@@ -405,7 +453,7 @@ const TranscriptScreen: React.FC = () => {
       {/* ── Search Bar (when transcript exists) ── */}
       {liveSegments.length > 0 && (
         <View style={styles.searchBar}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <Icon name="magnify" size={18} color={Colors.textTertiary} style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
             placeholder="Search words in transcript..."
@@ -418,7 +466,7 @@ const TranscriptScreen: React.FC = () => {
             <TouchableOpacity
               onPress={() => setSearchQuery('')}
               style={styles.clearSearchBtn}>
-              <Text style={styles.clearSearchText}>✕</Text>
+              <Icon name="close-circle" size={16} color={Colors.textTertiary} />
             </TouchableOpacity>
           )}
           {searchQuery.length > 0 && (
@@ -431,14 +479,21 @@ const TranscriptScreen: React.FC = () => {
         </View>
       )}
 
-      {/* ── Status notice ── */}
-      {liveSegments.length > 0 ? (
-        <View style={styles.verifiedNotice}>
-          <Text style={styles.verifiedNoticeText}>
-            ✓ AI Transcribed ({SUPPORTED_PROVIDERS[activeProvider]?.name || 'Speech-to-Text'}) • Synchronized Playback Active
+      {/* ── Active Translation Banner (only when non-English selected) ── */}
+      {selectedLanguage !== 'English' && (
+        <View style={styles.translatingBanner}>
+          <Icon name="auto-fix" size={14} color="#7C3AED" style={{marginRight: 6}} />
+          <Text style={styles.translatingBannerText}>
+            Auto-translating to {selectedLanguage}
           </Text>
+          <TouchableOpacity onPress={() => setSelectedLanguage('English')}>
+            <Text style={styles.resetLangText}>Reset</Text>
+          </TouchableOpacity>
         </View>
-      ) : isTranscribing ? (
+      )}
+
+      {/* ── Status notice (transcribing spinner only) ── */}
+      {isTranscribing ? (
         <View style={styles.transcribingNotice}>
           <ActivityIndicator size="small" color={Colors.primary} />
           <Text style={styles.transcribingNoticeText}>
@@ -447,10 +502,67 @@ const TranscriptScreen: React.FC = () => {
         </View>
       ) : null}
 
+      {/* ── Language Picker Modal ── */}
+      <Modal
+        visible={langModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setLangModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Select Transcript Language</Text>
+            <Text style={styles.modalSubtitle}>
+              Transcript bubbles will be auto-translated to the selected language.
+            </Text>
+            <RNScrollView showsVerticalScrollIndicator={false}>
+              {LANGUAGE_OPTIONS.map(lang => (
+                <TouchableOpacity
+                  key={lang.code}
+                  style={[
+                    styles.langOption,
+                    selectedLanguage === lang.code && styles.langOptionActive,
+                  ]}
+                  onPress={() => {
+                    setSelectedLanguage(lang.code);
+                    setLangModalVisible(false);
+                    toast.info(
+                      'Language Changed',
+                      lang.code === 'English'
+                        ? 'Showing original transcript'
+                        : `Translating to ${lang.code}`,
+                    );
+                  }}
+                  activeOpacity={0.7}>
+                  <Text style={styles.langOptionFlag}>{lang.flag}</Text>
+                  <Text
+                    style={[
+                      styles.langOptionLabel,
+                      selectedLanguage === lang.code && styles.langOptionLabelActive,
+                    ]}>
+                    {lang.label}
+                  </Text>
+                  {selectedLanguage === lang.code && (
+                    <Icon name="check-circle" size={18} color={Colors.primary} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </RNScrollView>
+            <TouchableOpacity
+              style={styles.modalCloseBtn}
+              onPress={() => setLangModalVisible(false)}>
+              <Text style={styles.modalCloseBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* ── Messages List ── */}
       {liveSegments.length === 0 ? (
         <View style={styles.noTranscript}>
-          <Text style={styles.noTranscriptIcon}>🎙️</Text>
+          <View style={styles.noTranscriptIconCircle}>
+            <Icon name="microphone-outline" size={44} color={Colors.primary} />
+          </View>
           <Text style={styles.noTranscriptTitle}>No Transcript Yet</Text>
           <Text style={styles.noTranscriptText}>
             Generate speaker diarization, timestamps, and language detection using {SUPPORTED_PROVIDERS[activeProvider]?.name || 'AI STT'}.
@@ -469,7 +581,8 @@ const TranscriptScreen: React.FC = () => {
               activeOpacity={0.8}
               accessibilityLabel="Transcribe call recording"
               accessibilityRole="button">
-              <Text style={styles.transcribeBtnText}>🎙️ Transcribe This Call</Text>
+              <Icon name="waveform" size={18} color={Colors.textInverse} style={{marginRight: 6}} />
+              <Text style={styles.transcribeBtnText}>Transcribe This Call</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -507,12 +620,7 @@ const styles = StyleSheet.create({
   },
   backButton: {
     padding: Spacing.sm,
-    marginRight: Spacing.sm,
-  },
-  backIcon: {
-    fontSize: FontSize.xl,
-    color: Colors.primary,
-    fontWeight: '600',
+    marginRight: Spacing.xs,
   },
   topBarCenter: {
     flex: 1,
@@ -524,14 +632,53 @@ const styles = StyleSheet.create({
   },
   topBarSubtitle: {
     fontSize: FontSize.xs,
-    color: Colors.textTertiary,
-    marginTop: 2,
+    color: Colors.textSecondary,
+    marginTop: 1,
+  },
+  topBarActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   actionBtn: {
-    padding: Spacing.sm,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  actionBtnIcon: {
-    fontSize: 20,
+  langIndicatorDot: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#7C3AED',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  translatingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F5F3FF',
+    paddingHorizontal: Spacing.base,
+    paddingVertical: 7,
+    borderBottomWidth: 1,
+    borderBottomColor: '#DDD6FE',
+  },
+  translatingBannerText: {
+    fontSize: FontSize.xs,
+    fontWeight: '600',
+    color: '#7C3AED',
+  },
+  resetLangText: {
+    fontSize: FontSize.xs,
+    fontWeight: '600',
+    color: Colors.primary,
+    textDecorationLine: 'underline',
   },
 
   // Audio Dock
@@ -544,19 +691,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
     gap: Spacing.md,
+    ...(Shadow.sm as object),
   },
   dockPlayBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  dockPlayIcon: {
-    color: Colors.textInverse,
-    fontSize: 14,
-    fontWeight: '700',
+    ...(Shadow.sm as object),
   },
   dockTrackCol: {
     flex: 1,
@@ -568,20 +712,24 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   dockTimeText: {
-    fontSize: 11,
+    fontSize: 10,
     color: Colors.textSecondary,
-    fontVariant: ['tabular-nums'],
     fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
+  dockSyncRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   dockSyncBadge: {
     fontSize: 10,
-    color: Colors.primary,
-    fontWeight: '700',
+    color: Colors.textSecondary,
+    fontWeight: '600',
   },
   dockTrack: {
-    height: 5,
-    backgroundColor: Colors.surfaceSecondary,
+    height: 6,
     borderRadius: 3,
+    backgroundColor: Colors.borderLight,
     overflow: 'hidden',
   },
   dockTrackFilled: {
@@ -590,7 +738,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
 
-  // Search Bar
+  // Search bar
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -601,7 +749,6 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   searchIcon: {
-    fontSize: 14,
     marginRight: Spacing.sm,
   },
   searchInput: {
@@ -612,10 +759,6 @@ const styles = StyleSheet.create({
   },
   clearSearchBtn: {
     padding: Spacing.xs,
-  },
-  clearSearchText: {
-    fontSize: 14,
-    color: Colors.textTertiary,
   },
   matchCountBadge: {
     backgroundColor: Colors.primaryLight,
@@ -630,8 +773,127 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
+  // Language selector
+  langSelectorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.base,
+    paddingVertical: 8,
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    gap: Spacing.sm,
+  },
+  langChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primaryLight,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: Colors.primary + '30',
+  },
+  langChipText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  translatingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EDE9FE',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#C4B5FD',
+  },
+  translatingBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#7C3AED',
+  },
+
+  // Language Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 12,
+    paddingBottom: 32,
+    paddingHorizontal: Spacing.xl,
+    maxHeight: '75%',
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#D1D5DB',
+    alignSelf: 'center',
+    marginBottom: Spacing.base,
+  },
+  modalTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    marginBottom: Spacing.base,
+    lineHeight: 18,
+  },
+  langOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    gap: Spacing.md,
+  },
+  langOptionActive: {
+    backgroundColor: Colors.primaryLight + '80',
+    borderRadius: 10,
+    paddingHorizontal: Spacing.sm,
+    marginHorizontal: -Spacing.sm,
+  },
+  langOptionFlag: {
+    fontSize: 22,
+  },
+  langOptionLabel: {
+    flex: 1,
+    fontSize: FontSize.base,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  langOptionLabelActive: {
+    color: Colors.primary,
+  },
+  modalCloseBtn: {
+    marginTop: Spacing.base,
+    paddingVertical: 14,
+    borderRadius: BorderRadius.xl,
+    backgroundColor: Colors.surfaceSecondary,
+    alignItems: 'center',
+  },
+  modalCloseBtnText: {
+    fontSize: FontSize.base,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+  },
+
   // Notices
   verifiedNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: Colors.successLight,
     paddingHorizontal: Spacing.base,
     paddingVertical: 6,
@@ -642,7 +904,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.success,
     fontWeight: '700',
-    textAlign: 'center',
   },
   transcribingNotice: {
     flexDirection: 'row',
@@ -777,11 +1038,15 @@ const styles = StyleSheet.create({
     marginTop: 6,
     gap: Spacing.sm,
   },
+  tapSeekRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   tapSeekText: {
-    fontSize: 9,
+    fontSize: 10,
     color: Colors.primary,
     fontWeight: '600',
-    opacity: 0.7,
+    opacity: 0.8,
   },
   bubbleTime: {
     fontSize: FontSize.xs,
@@ -796,8 +1061,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: Spacing['2xl'],
   },
-  noTranscriptIcon: {
-    fontSize: 56,
+  noTranscriptIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: Colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: Spacing.lg,
   },
   noTranscriptTitle: {
@@ -814,6 +1084,8 @@ const styles = StyleSheet.create({
     maxWidth: 300,
   },
   transcribeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: Colors.primary,
     paddingVertical: Spacing.md,
     paddingHorizontal: Spacing.xl,
@@ -854,12 +1126,21 @@ const styles = StyleSheet.create({
   notFoundText: {
     fontSize: FontSize.lg,
     color: Colors.textSecondary,
+    marginTop: Spacing.md,
     marginBottom: Spacing.lg,
+  },
+  backLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
   },
   backLink: {
     fontSize: FontSize.base,
     color: Colors.primary,
-    fontWeight: '600',
+    fontWeight: '700',
   },
 });
 

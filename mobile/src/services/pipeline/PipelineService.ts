@@ -1,4 +1,4 @@
-// TeleCaller AI — Automatic Pipeline Service (Phase 11)
+// TeleCaller AI — Automatic Pipeline Service
 // Coordinates the complete automated end-to-end processing pipeline:
 // 1. DISCOVERY / MATCH: Match audio recording with Android Call Log & Contacts
 // 2. DRIVE UPLOAD: Stream resumable upload to Google Drive (with duplicate check)

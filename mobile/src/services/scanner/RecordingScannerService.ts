@@ -1,4 +1,4 @@
-// TeleCaller AI — Recording Scanner Service (Phase 3)
+// TeleCaller AI — Recording Scanner Service
 // Interfaces with Android native MediaStore & OEM folder scanning.
 
 import {NativeModules, PermissionsAndroid, Platform} from 'react-native';
@@ -51,7 +51,7 @@ export class RecordingScannerService {
           {
             title: 'Audio Recording Access',
             message:
-              'TeleCaller AI needs access to your device audio files to automatically discover and organize call recordings.',
+              'Audify AI needs access to your device audio files to automatically discover and organize call recordings.',
             buttonPositive: 'Allow',
             buttonNegative: 'Deny',
           },
@@ -63,7 +63,7 @@ export class RecordingScannerService {
           {
             title: 'Storage Access Permission',
             message:
-              'TeleCaller AI needs storage access to find call recordings saved on your phone.',
+              'Audify AI needs storage access to find call recordings saved on your phone.',
             buttonPositive: 'Allow',
             buttonNegative: 'Deny',
           },
@@ -124,7 +124,7 @@ export class RecordingScannerService {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Phase 4: Storage Access Framework Folder Picker & Persistence
+  // Storage Access Framework Folder Picker & Persistence
   // ─────────────────────────────────────────────────────────────
 
   /**
@@ -194,7 +194,7 @@ export class RecordingScannerService {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Phase 5: Device Call Log Permissions
+  // Device Call Log Permissions
   // ─────────────────────────────────────────────────────────────
 
   /**
@@ -227,7 +227,7 @@ export class RecordingScannerService {
         {
           title: 'Device Call Log Access',
           message:
-            'TeleCaller AI uses device call logs to automatically associate caller names, phone numbers, and call direction with your audio recordings.',
+            'Audify AI uses device call logs to automatically associate caller names, phone numbers, and call direction with your audio recordings.',
           buttonPositive: 'Allow',
           buttonNegative: 'Deny',
         },

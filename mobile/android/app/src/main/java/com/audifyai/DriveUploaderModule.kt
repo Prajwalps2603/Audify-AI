@@ -1,4 +1,4 @@
-package com.telecallerai
+package com.audifyai
 
 import android.net.Uri
 import com.facebook.react.bridge.*

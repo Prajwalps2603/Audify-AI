@@ -1,82 +1,57 @@
-// TeleCaller AI — Login Screen (Phase 2)
-// Real Google OAuth Sign-In using @react-native-google-signin/google-signin.
-// IMPORTANT: Requires WEB_CLIENT_ID to be set in AuthService.ts
-//            and google-services.json placed in android/app/
+// TeleCaller AI — Login Screen
+// Full-screen white theme. No scroll. Fits all screen sizes.
 
-import React, {useEffect} from 'react';
+import React, {useEffect, useRef} from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   TouchableOpacity,
-  StatusBar,
-  ScrollView,
-  Dimensions,
   ActivityIndicator,
-  Alert,
+  StatusBar,
+  Animated,
+  Easing,
+  Dimensions,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
-import {RootStackParamList} from '../../types';
-import {Colors, FontSize, BorderRadius, Shadow, Spacing} from '../../theme';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import {Colors, FontSize, BorderRadius, Spacing} from '../../theme';
 import {useAuth} from '../../context/AuthContext';
+import {RootStackParamList} from '../../types';
+import {showAlert} from '../../components/AppModal';
 
-const {width} = Dimensions.get('window');
+const {width: SCREEN_W, height: SCREEN_H} = Dimensions.get('window');
 
 type LoginScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
   'Login'
 >;
-
 interface Props {
   navigation: LoginScreenNavigationProp;
 }
 
 // ─────────────────────────────────────────────────────────────
-// Waveform visual decoration
+// Feature row
 // ─────────────────────────────────────────────────────────────
-const WaveformVisual: React.FC = () => {
-  const bars = [
-    0.3, 0.6, 0.9, 0.7, 1.0, 0.8, 0.5, 0.9, 0.6, 0.4, 0.7, 0.95, 0.5, 0.3,
-    0.65,
-  ];
-  return (
-    <View style={styles.waveformContainer}>
-      {bars.map((h, i) => (
-        <View
-          key={i}
-          style={[
-            styles.waveBar,
-            {
-              height: h * 40,
-              backgroundColor:
-                i % 3 === 0
-                  ? Colors.primary
-                  : i % 3 === 1
-                  ? Colors.secondary
-                  : Colors.primaryLight,
-              opacity: 0.7 + h * 0.3,
-            },
-          ]}
-        />
-      ))}
+interface FeatureRowProps {
+  icon: string;
+  bg: string;
+  iconColor: string;
+  title: string;
+  desc: string;
+}
+const FeatureRow: React.FC<FeatureRowProps> = ({icon, bg, iconColor, title, desc}) => (
+  <View style={styles.featureRow}>
+    <View style={[styles.featureBadge, {backgroundColor: bg}]}>
+      <Icon name={icon} size={18} color={iconColor} />
     </View>
-  );
-};
-
-// ─────────────────────────────────────────────────────────────
-// Hero Visual
-// ─────────────────────────────────────────────────────────────
-const HeroVisual: React.FC = () => (
-  <View style={styles.heroContainer}>
-    <View style={styles.glowRing} />
-    <View style={styles.middleRing} />
-    <View style={styles.centerCircle}>
-      <Text style={styles.phoneIcon}>📞</Text>
+    <View style={{flex: 1}}>
+      <Text style={styles.featureTitle}>{title}</Text>
+      <Text style={styles.featureDesc}>{desc}</Text>
     </View>
-    <View style={[styles.sparkDot, styles.sparkTopRight]} />
-    <View style={[styles.sparkDot, styles.sparkBottomLeft]} />
-    <View style={[styles.sparkDot, styles.sparkTopLeft]} />
+    <Icon name="chevron-right" size={16} color={Colors.textTertiary} />
   </View>
 );
 
@@ -85,398 +60,338 @@ const HeroVisual: React.FC = () => (
 // ─────────────────────────────────────────────────────────────
 const LoginScreen: React.FC<Props> = ({navigation}) => {
   const {authState, signIn, clearError} = useAuth();
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(28)).current;
 
   const isLoading = authState.status === 'INITIALIZING';
-  const hasError = authState.status === 'ERROR';
 
-  // Navigate to Main when signed in
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 650,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 650,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+
   useEffect(() => {
     if (authState.status === 'SIGNED_IN') {
       navigation.replace('Main');
     }
   }, [authState.status, navigation]);
 
-  // Show error alert when auth fails
   useEffect(() => {
     if (authState.status === 'ERROR') {
-      const message =
-        authState.status === 'ERROR' ? authState.message : 'Sign-in failed.';
-      Alert.alert(
-        'Sign-In Failed',
-        message +
-          '\n\nMake sure you have:\n• Set your WEB_CLIENT_ID in AuthService.ts\n• Placed google-services.json in android/app/',
-        [
-          {
-            text: 'OK',
-            onPress: clearError,
-          },
-        ],
-      );
+      const msg = authState.status === 'ERROR' ? authState.message : 'Sign-in failed.';
+      showAlert({
+        title: 'Sign-In Failed',
+        message:
+          msg +
+          '\n\nMake sure you have:\n• Set WEB_CLIENT_ID in AuthService.ts\n• Placed google-services.json in android/app/',
+        variant: 'error',
+        buttons: [{text: 'OK', onPress: clearError}],
+      });
     }
-  }, [authState.status]);
-
-  const handleGoogleSignIn = async () => {
-    if (isLoading) return;
-    await signIn();
-  };
+  }, [authState.status, clearError]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.root}>
       <StatusBar barStyle="dark-content" />
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
 
-        {/* ── Branding ── */}
-        <View style={styles.header}>
-          <View style={styles.brandRow}>
-            <View style={styles.logoMark}>
-              <Text style={styles.logoMarkText}>TC</Text>
-            </View>
-            <Text style={styles.brandName}>TeleCaller AI</Text>
+      {/* Subtle background decorations */}
+      <View style={styles.bgCircle1} />
+      <View style={styles.bgCircle2} />
+      <View style={styles.bgCircle3} />
+
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <Animated.View
+          style={[
+            styles.content,
+            {opacity: fadeAnim, transform: [{translateY: slideAnim}]},
+          ]}>
+
+          {/* ── HERO: Main Brand Logo ── */}
+          <View style={styles.logoContainer}>
+            <Image
+              source={require('../../assets/logo_main.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
           </View>
-          <Text style={styles.tagline}>Record • Transcribe • Organize</Text>
-        </View>
 
-        {/* ── Hero Visual ── */}
-        <View style={styles.heroSection}>
-          <HeroVisual />
-          <WaveformVisual />
-        </View>
+          {/* ── HEADLINE ── */}
+          <View style={styles.headlineSection}>
+            <Text style={styles.headline}>
+              Every call tells{'\n'}
+              <Text style={styles.headlineAccent}>a story.</Text>
+            </Text>
+            <Text style={styles.subheadline}>
+              AI-powered call transcription & audio intelligence
+            </Text>
+          </View>
 
-        {/* ── Headline ── */}
-        <View style={styles.headlineSection}>
-          <Text style={styles.headline}>
-            Turn every conversation{'\n'}into organized insights.
-          </Text>
-          <Text style={styles.subheadline}>
-            Automatically transcribe, organize, and analyze your call recordings
-            powered by AI.
-          </Text>
-        </View>
+          {/* ── FEATURES ── */}
+          <View style={styles.featuresCard}>
+            <FeatureRow
+              icon="microphone-outline"
+              bg={Colors.primaryLight + '55'}
+              iconColor={Colors.primary}
+              title="Auto-Transcription"
+              desc="Google Cloud Speech-to-Text"
+            />
+            <View style={styles.featureDivider} />
+            <FeatureRow
+              icon="cloud-sync-outline"
+              bg={Colors.secondaryLight + '44'}
+              iconColor={Colors.secondary}
+              title="Drive & Sheets Backup"
+              desc="All recordings synced automatically"
+            />
+            <View style={styles.featureDivider} />
+            <FeatureRow
+              icon="shield-check-outline"
+              bg={Colors.successLight}
+              iconColor={Colors.success}
+              title="Private & Secure"
+              desc="Stays in your Google account"
+            />
+          </View>
 
-        {/* ── Feature pills ── */}
-        <View style={styles.featurePills}>
-          {['🔒 Secure', '🔑 Google Login', '☁️ Cloud Sync'].map((feat, i) => (
-            <View key={i} style={styles.featurePill}>
-              <Text style={styles.featurePillText}>{feat}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* ── Sign-in Button ── */}
-        <View style={styles.buttonSection}>
-          <TouchableOpacity
-            style={[
-              styles.googleButton,
-              isLoading && styles.googleButtonDisabled,
-            ]}
-            onPress={handleGoogleSignIn}
-            activeOpacity={0.85}
-            accessibilityLabel="Continue with Google"
-            accessibilityRole="button"
-            disabled={isLoading}>
-            <View style={styles.googleButtonInner}>
+          {/* ── SIGN IN ── */}
+          <View style={styles.bottomSection}>
+            <TouchableOpacity
+              style={[styles.googleBtn, isLoading && {opacity: 0.7}]}
+              onPress={async () => { if (!isLoading) await signIn(); }}
+              disabled={isLoading}
+              activeOpacity={0.87}
+              accessibilityLabel="Continue with Google"
+              accessibilityRole="button">
               {isLoading ? (
                 <>
-                  <ActivityIndicator
-                    size="small"
-                    color={Colors.primary}
-                    style={styles.spinner}
-                  />
-                  <Text style={styles.googleButtonText}>Signing in...</Text>
+                  <ActivityIndicator size="small" color="#fff" />
+                  <Text style={styles.googleBtnText}>Signing in...</Text>
                 </>
               ) : (
                 <>
-                  <View style={styles.googleIcon}>
-                    <Text style={styles.googleIconText}>G</Text>
+                  <View style={styles.gBadge}>
+                    <Text style={styles.gText}>G</Text>
                   </View>
-                  <Text style={styles.googleButtonText}>
-                    Continue with Google
-                  </Text>
+                  <Text style={styles.googleBtnText}>Continue with Google</Text>
+                  <View style={styles.arrowBadge}>
+                    <Icon name="arrow-right" size={16} color={Colors.primary} />
+                  </View>
                 </>
               )}
-            </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
 
-          {/* Configuration notice — shown when WEB_CLIENT_ID is empty */}
-          <View style={styles.configNotice}>
-            <Text style={styles.configNoticeTitle}>
-              🔧 Google Cloud Setup Required
-            </Text>
-            <Text style={styles.configNoticeText}>
-              {'1. Create a project in Google Cloud Console\n' +
-                '2. Enable Google Sign-In + Drive + Sheets APIs\n' +
-                '3. Create OAuth 2.0 credentials (Android + Web)\n' +
-                '4. Set WEB_CLIENT_ID in AuthService.ts\n' +
-                '5. Download google-services.json → android/app/\n\n' +
-                'Debug SHA-1:\n5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25'}
-            </Text>
+            {/* Privacy note */}
+            <View style={styles.privacyRow}>
+              <Icon name="lock-outline" size={12} color={Colors.textTertiary} />
+              <Text style={styles.privacyText}>
+                Secure login · No password required · Google OAuth 2.0
+              </Text>
+            </View>
           </View>
-        </View>
 
-        {/* ── Trust indicators ── */}
-        <View style={styles.trustSection}>
-          {[
-            {icon: '🛡️', label: 'Secure'},
-            {icon: '🔒', label: 'Private'},
-            {icon: '✅', label: 'Google Account'},
-          ].map((item, i) => (
-            <View key={i} style={styles.trustItem}>
-              <Text style={styles.trustIcon}>{item.icon}</Text>
-              <Text style={styles.trustLabel}>{item.label}</Text>
-            </View>
-          ))}
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+        </Animated.View>
+      </SafeAreaView>
+    </View>
   );
 };
 
+// ─────────────────────────────────────────────────────────────
+// Styles
+// ─────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safeArea: {
+  root: {
     flex: 1,
-    backgroundColor: Colors.background,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: Spacing.xl,
-    paddingBottom: Spacing['3xl'],
+    backgroundColor: '#FFFFFF',
   },
 
-  // Header
-  header: {
-    alignItems: 'center',
-    paddingTop: Spacing.xl,
-    marginBottom: Spacing.xl,
-  },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: Spacing.sm,
-  },
-  logoMark: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+  // Background decoration blobs
+  bgCircle1: {
+    position: 'absolute',
+    top: -SCREEN_H * 0.08,
+    right: -SCREEN_W * 0.25,
+    width: SCREEN_W * 0.65,
+    height: SCREEN_W * 0.65,
+    borderRadius: SCREEN_W * 0.325,
     backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.sm,
-    ...(Shadow.md as object),
+    opacity: 0.06,
   },
-  logoMarkText: {
-    color: Colors.textInverse,
-    fontSize: FontSize.sm,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  brandName: {
-    fontSize: FontSize.xl,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-    letterSpacing: -0.5,
-  },
-  tagline: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    letterSpacing: 1.5,
-    fontWeight: '500',
-  },
-
-  // Hero
-  heroSection: {
-    alignItems: 'center',
-    marginBottom: Spacing['2xl'],
-  },
-  heroContainer: {
-    width: 160,
-    height: 160,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.lg,
-    position: 'relative',
-  },
-  glowRing: {
+  bgCircle2: {
     position: 'absolute',
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: '#EFF6FF',
-    opacity: 0.8,
-  },
-  middleRing: {
-    position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#DBEAFE',
-    opacity: 0.6,
-  },
-  centerCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...(Shadow.lg as object),
-  },
-  phoneIcon: {fontSize: 36},
-  sparkDot: {
-    position: 'absolute',
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    top: SCREEN_H * 0.22,
+    left: -SCREEN_W * 0.2,
+    width: SCREEN_W * 0.55,
+    height: SCREEN_W * 0.55,
+    borderRadius: SCREEN_W * 0.275,
     backgroundColor: Colors.secondary,
+    opacity: 0.05,
   },
-  sparkTopRight: {top: 16, right: 20},
-  sparkBottomLeft: {bottom: 20, left: 12},
-  sparkTopLeft: {
-    top: 30,
-    left: 20,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.primaryLight,
+  bgCircle3: {
+    position: 'absolute',
+    bottom: SCREEN_H * 0.05,
+    right: -SCREEN_W * 0.15,
+    width: SCREEN_W * 0.45,
+    height: SCREEN_W * 0.45,
+    borderRadius: SCREEN_W * 0.225,
+    backgroundColor: Colors.primary,
+    opacity: 0.04,
   },
 
-  // Waveform
-  waveformContainer: {
-    flexDirection: 'row',
+  safeArea: {flex: 1},
+  content: {
+    flex: 1,
+    paddingHorizontal: Spacing.xl,
+    justifyContent: 'space-between',
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.sm,
+  },
+
+  // ── Logo Hero ──
+  logoContainer: {
     alignItems: 'center',
-    height: 48,
-    gap: 3,
+    justifyContent: 'center',
+    paddingVertical: SCREEN_H < 700 ? Spacing.sm : Spacing.md,
+    marginTop: Spacing.xs,
   },
-  waveBar: {
-    width: 4,
-    borderRadius: 2,
+  logoImage: {
+    width: SCREEN_W * 0.85,
+    height: SCREEN_H < 700 ? 100 : 125,
   },
 
-  // Headline
+  // ── Headline ──
   headlineSection: {
-    alignItems: 'center',
-    marginBottom: Spacing.xl,
+    gap: Spacing.xs,
   },
   headline: {
-    fontSize: FontSize['2xl'],
+    fontSize: SCREEN_H < 700 ? FontSize['2xl'] : FontSize['3xl'],
     fontWeight: '800',
     color: Colors.textPrimary,
-    textAlign: 'center',
-    lineHeight: 32,
-    letterSpacing: -0.5,
-    marginBottom: Spacing.md,
+    letterSpacing: -0.8,
+    lineHeight: SCREEN_H < 700 ? 32 : 40,
+  },
+  headlineAccent: {
+    color: Colors.primary,
   },
   subheadline: {
-    fontSize: FontSize.base,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 24,
-    paddingHorizontal: Spacing.lg,
-  },
-
-  // Feature pills
-  featurePills: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    marginBottom: Spacing['2xl'],
-    flexWrap: 'wrap',
-  },
-  featurePill: {
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    ...(Shadow.sm as object),
-  },
-  featurePillText: {
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
-    fontWeight: '500',
+    lineHeight: 20,
+    marginTop: 4,
   },
 
-  // Button
-  buttonSection: {
-    alignItems: 'center',
-    marginBottom: Spacing['2xl'],
-  },
-  googleButton: {
-    width: '100%',
+  // ── Features card ──
+  featuresCard: {
     backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg,
+    borderRadius: BorderRadius.xl,
     borderWidth: 1.5,
     borderColor: Colors.border,
-    paddingVertical: Spacing.base,
-    marginBottom: Spacing.md,
-    ...(Shadow.md as object),
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
   },
-  googleButtonDisabled: {
-    opacity: 0.7,
-  },
-  googleButtonInner: {
+  featureRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    gap: Spacing.md,
+  },
+  featureBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  spinner: {
-    marginRight: Spacing.md,
+  featureTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginBottom: 1,
   },
-  googleIcon: {
+  featureDesc: {
+    fontSize: FontSize.xs,
+    color: Colors.textTertiary,
+  },
+  featureDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginLeft: 66,
+  },
+
+  // ── Bottom ──
+  bottomSection: {
+    gap: Spacing.sm,
+  },
+  googleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.xl,
+    paddingVertical: 14,
+    paddingHorizontal: Spacing.lg,
+    gap: Spacing.sm,
+    shadowColor: Colors.primary,
+    shadowOffset: {width: 0, height: 8},
+    shadowOpacity: 0.28,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  gBadge: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: Colors.primary,
+    backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: Spacing.md,
   },
-  googleIconText: {
-    color: Colors.textInverse,
+  gText: {
     fontSize: FontSize.base,
-    fontWeight: '800',
-  },
-  googleButtonText: {
-    fontSize: FontSize.base,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-  },
-
-  // Config notice
-  configNotice: {
-    width: '100%',
-    backgroundColor: Colors.surfaceSecondary,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.base,
-    borderWidth: 1.5,
-    borderColor: Colors.primaryLight,
-  },
-  configNoticeTitle: {
-    fontSize: FontSize.sm,
-    fontWeight: '700',
+    fontWeight: '900',
     color: Colors.primary,
-    marginBottom: Spacing.sm,
+    lineHeight: 19,
   },
-  configNoticeText: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    lineHeight: 18,
+  googleBtnText: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: FontSize.base,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 0.2,
+  },
+  arrowBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
-  // Trust
-  trustSection: {
+  privacyRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing['2xl'],
+    gap: 5,
   },
-  trustItem: {alignItems: 'center'},
-  trustIcon: {fontSize: 20, marginBottom: 4},
-  trustLabel: {
+  privacyText: {
     fontSize: FontSize.xs,
     color: Colors.textTertiary,
-    fontWeight: '500',
+    textAlign: 'center',
   },
 });
 

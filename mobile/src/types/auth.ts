@@ -1,4 +1,4 @@
-// TeleCaller AI — Auth Types (Phase 2)
+// TeleCaller AI — Auth Types
 
 export interface GoogleUserInfo {
   id: string;
@@ -24,5 +24,5 @@ export interface AuthSession {
 export type AuthState =
   | {status: 'INITIALIZING'}
   | {status: 'SIGNED_OUT'}
-  | {status: 'SIGNED_IN'; session: AuthSession}
+  | {status: 'SIGNED_IN'; session: AuthSession; needsConsent?: boolean}
   | {status: 'ERROR'; message: string};

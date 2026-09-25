@@ -1,4 +1,4 @@
-// TeleCaller AI — Server Transcription Service (Phase 9)
+// Audify AI — Server Transcription Service (Phase 9)
 // Multi-provider speech-to-text engine supporting Google Cloud Speech-to-Text,
 // OpenAI Whisper, and Deepgram Nova-2 with speaker diarization, timestamps,
 // and language detection.
@@ -411,7 +411,7 @@ export class ServerTranscriptionService {
         id: `seg_sim_3`,
         speaker: 'CALLER',
         speakerLabel: callerName,
-        text: 'I am calling regarding your recent inquiry with TeleCaller AI. We wanted to confirm your account details and discuss the requested service schedule.',
+        text: 'I am calling regarding your recent inquiry with Audify AI. We wanted to confirm your account details and discuss the requested service schedule.',
         startTime: 10,
         endTime: 19,
         timestamp: '00:10',

@@ -1,3 +1,6 @@
+// TeleCaller AI — Calls Screen
+// Comprehensive call list with multi-dimensional filtering, search, and recording discovery.
+
 import React, {useState, useMemo, useEffect} from 'react';
 import {
   View,
@@ -8,14 +11,13 @@ import {
   TouchableOpacity,
   TextInput,
   StatusBar,
-  Dimensions,
   ListRenderItem,
-  Alert,
+  RefreshControl,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {Colors, FontSize, BorderRadius, Shadow, Spacing} from '../../theme';
-import {MOCK_CALLS} from '../../mock/mockData';
 import {
   CallRecord,
   DateFilter,
@@ -25,11 +27,13 @@ import {
 } from '../../types';
 import Avatar from '../../components/Avatar';
 import StatusBadge from '../../components/StatusBadge';
-import Card from '../../components/Card';
+import BrandHeader from '../../components/BrandHeader';
 import {useRecordings} from '../../context/RecordingContext';
 import {RecordingScannerService} from '../../services/scanner/RecordingScannerService';
 import {PipelineService} from '../../services/pipeline/PipelineService';
 import {PipelineJob} from '../../types/pipeline';
+import {toast} from '../../components/Toast';
+import {showAlert} from '../../components/AppModal';
 
 // ─────────────────────────────────────────────────────────────
 // Filter chips
@@ -59,15 +63,29 @@ interface FilterChipProps {
   label: string;
   isActive: boolean;
   onPress: () => void;
+  iconName?: string;
 }
 
-const FilterChip: React.FC<FilterChipProps> = ({label, isActive, onPress}) => (
+const FilterChip: React.FC<FilterChipProps> = ({
+  label,
+  isActive,
+  onPress,
+  iconName,
+}) => (
   <TouchableOpacity
     style={[styles.chip, isActive && styles.chipActive]}
     onPress={onPress}
     activeOpacity={0.7}
     accessibilityLabel={`Filter by ${label}`}
     accessibilityRole="button">
+    {iconName && (
+      <Icon
+        name={iconName}
+        size={14}
+        color={isActive ? Colors.textInverse : Colors.textSecondary}
+        style={styles.chipIcon}
+      />
+    )}
     <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
       {label}
     </Text>
@@ -93,6 +111,18 @@ const CallCard: React.FC<CallCardProps> = ({
   const isIncoming = call.callType === 'Incoming';
   const isMissed = call.callType === 'Missed';
 
+  const typeIconName = isMissed
+    ? 'phone-missed'
+    : isIncoming
+    ? 'phone-incoming'
+    : 'phone-outgoing';
+
+  const typeColor = isMissed
+    ? Colors.error
+    : isIncoming
+    ? Colors.success
+    : Colors.primary;
+
   return (
     <TouchableOpacity
       style={styles.callCard}
@@ -105,18 +135,7 @@ const CallCard: React.FC<CallCardProps> = ({
         <View style={styles.callCardLeft}>
           <Avatar name={call.name} size={50} />
           {/* Call type indicator dot */}
-          <View
-            style={[
-              styles.callTypeDot,
-              {
-                backgroundColor: isMissed
-                  ? Colors.error
-                  : isIncoming
-                  ? Colors.success
-                  : Colors.primary,
-              },
-            ]}
-          />
+          <View style={[styles.callTypeDot, {backgroundColor: typeColor}]} />
         </View>
 
         {/* Info */}
@@ -135,57 +154,90 @@ const CallCard: React.FC<CallCardProps> = ({
         {/* Right side */}
         <View style={styles.callCardRight}>
           <View style={styles.callTypeRow}>
-            <Text
-              style={[
-                styles.callTypeArrow,
-                {
-                  color: isMissed
-                    ? Colors.error
-                    : isIncoming
-                    ? Colors.success
-                    : Colors.primary,
-                },
-              ]}>
-              {isMissed ? '✕' : isIncoming ? '↙' : '↗'}
-            </Text>
+            <Icon name={typeIconName} size={15} color={typeColor} />
             <Text style={styles.callDuration}>{call.duration}</Text>
           </View>
-          {call.matchedWithCallLog ? (
-            <View style={styles.callLogBadge}>
-              <Text style={styles.callLogBadgeText}>✓ Matched</Text>
-            </View>
-          ) : (
-            <Text style={styles.callLanguage}>{call.language}</Text>
-          )}
+          {/* Call Log Badge & Active Pipeline Indicator */}
           {pipelineJob &&
           pipelineJob.stage !== 'QUEUED' &&
           pipelineJob.stage !== 'COMPLETED' ? (
             <View style={styles.pipelineBadge}>
+              <Icon
+                name={
+                  pipelineJob.stage === 'DRIVE'
+                    ? 'cloud-upload-outline'
+                    : pipelineJob.stage === 'TRANSCRIPTION'
+                    ? 'waveform'
+                    : pipelineJob.stage === 'SHEETS'
+                    ? 'table'
+                    : 'lightning-bolt'
+                }
+                size={12}
+                color={Colors.primary}
+              />
               <Text style={styles.pipelineBadgeText}>
                 {pipelineJob.stage === 'DRIVE'
-                  ? `☁️ ${pipelineJob.progressPercent}%`
+                  ? `${pipelineJob.progressPercent}%`
                   : pipelineJob.stage === 'TRANSCRIPTION'
-                  ? '🎙️ Diarizing'
+                  ? 'Diarizing'
                   : pipelineJob.stage === 'SHEETS'
-                  ? '📊 Logging'
-                  : '⚡ Matching'}
+                  ? 'Logging'
+                  : 'Matching'}
               </Text>
             </View>
           ) : (
-            <StatusBadge
-              status={
-                pipelineJob?.stage === 'COMPLETED' ? 'COMPLETED' : call.status
-              }
-              size="sm"
-            />
+            <View
+              style={[
+                styles.callLogBadge,
+                {
+                  backgroundColor: isIncoming
+                    ? '#DCFCE7'
+                    : isMissed
+                    ? '#FEE2E2'
+                    : '#EFF6FF',
+                  borderColor: isIncoming
+                    ? '#86EFAC'
+                    : isMissed
+                    ? '#FECACA'
+                    : '#BFDBFE',
+                },
+              ]}>
+              <Icon
+                name={typeIconName}
+                size={11}
+                color={typeColor}
+              />
+              <Text
+                style={[
+                  styles.callLogBadgeText,
+                  {
+                    color: isIncoming
+                      ? '#166534'
+                      : isMissed
+                      ? '#991B1B'
+                      : '#1E40AF',
+                  },
+                ]}>
+                {call.callType} Call Log
+              </Text>
+            </View>
           )}
+
+          {call.language ? (
+            <Text style={styles.callLanguage}>{call.language}</Text>
+          ) : null}
         </View>
       </View>
 
-      {/* Matched Transcript Snippet (Phase 13) */}
+      {/* Matched Transcript Snippet */}
       {matchingSnippet ? (
         <View style={styles.snippetContainer}>
-          <Text style={styles.snippetIcon}>💬</Text>
+          <Icon
+            name="comment-text-outline"
+            size={14}
+            color={Colors.textTertiary}
+            style={styles.snippetIcon}
+          />
           <Text style={styles.snippetText} numberOfLines={2}>
             {matchingSnippet}
           </Text>
@@ -249,21 +301,16 @@ function matchesStatusFilter(
   filter: StatusFilter,
 ): boolean {
   if (filter === 'All') return true;
-  const isCompleted =
-    status === 'COMPLETED' || pipelineStage === 'COMPLETED';
-  const isFailed = status === 'FAILED' || pipelineStage === 'FAILED';
-  const isPending = !isCompleted && !isFailed;
-
-  if (filter === 'Completed') return isCompleted;
-  if (filter === 'Failed') return isFailed;
-  if (filter === 'Pending') return isPending;
-  if (filter === 'Processing')
-    return Boolean(
-      pipelineStage &&
-        pipelineStage !== 'QUEUED' &&
-        pipelineStage !== 'COMPLETED' &&
-        pipelineStage !== 'FAILED',
+  const effective = pipelineStage === 'COMPLETED' ? 'COMPLETED' : status;
+  if (filter === 'Completed') return effective === 'COMPLETED';
+  if (filter === 'Pending') {
+    return (
+      effective === 'PENDING' ||
+      effective === 'PROCESSING' ||
+      effective === 'DISCOVERED'
     );
+  }
+  if (filter === 'Failed') return effective === 'FAILED';
   return true;
 }
 
@@ -271,7 +318,6 @@ function extractMatchingSnippet(call: CallRecord, query: string): string | null 
   if (!query || query.length < 2) return null;
   const q = query.toLowerCase();
 
-  // 1. Check transcriptPreview
   if (call.transcriptPreview) {
     const previewLower = call.transcriptPreview.toLowerCase();
     const idx = previewLower.indexOf(q);
@@ -287,7 +333,6 @@ function extractMatchingSnippet(call: CallRecord, query: string): string | null 
     }
   }
 
-  // 2. Check segments
   if (call.transcript && Array.isArray(call.transcript)) {
     for (const seg of call.transcript) {
       const textLower = seg.text.toLowerCase();
@@ -321,9 +366,6 @@ function formatDate(dateStr: string): string {
 // ─────────────────────────────────────────────────────────────
 // Empty State
 // ─────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────
-// Empty State
-// ─────────────────────────────────────────────────────────────
 interface EmptyStateProps {
   query: string;
   isScanning: boolean;
@@ -346,8 +388,10 @@ const EmptyState: React.FC<EmptyStateProps> = ({
   if (hasActiveFilters) {
     return (
       <View style={styles.emptyState}>
-        <Text style={styles.emptyIcon}>🔍</Text>
-        <Text style={styles.emptyTitle}>No Matching Calls Found</Text>
+        <View style={styles.emptyIconCircle}>
+          <Icon name="magnify" size={36} color={Colors.textTertiary} />
+        </View>
+        <Text style={styles.emptyTitle}>No Matching Calls</Text>
         <Text style={styles.emptySubtitle}>
           {query
             ? `No recordings or transcripts match "${query}".`
@@ -360,7 +404,8 @@ const EmptyState: React.FC<EmptyStateProps> = ({
             activeOpacity={0.8}
             accessibilityLabel="Clear all filters"
             accessibilityRole="button">
-            <Text style={styles.selectFolderBtnText}>✕ Clear All Filters</Text>
+            <Icon name="filter-remove-outline" size={18} color={Colors.textInverse} style={styles.btnIcon} />
+            <Text style={styles.selectFolderBtnText}>Clear All Filters</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -369,16 +414,18 @@ const EmptyState: React.FC<EmptyStateProps> = ({
 
   return (
     <View style={styles.emptyState}>
-      <Text style={styles.emptyIcon}>📁</Text>
+      <View style={styles.emptyIconCircle}>
+        <Icon name="folder-music-outline" size={40} color={Colors.primary} />
+      </View>
       <Text style={styles.emptyTitle}>
-        {query ? 'No Calls Found' : 'No call recordings found.'}
+        {query ? 'No Calls Found' : 'No Call Recordings'}
       </Text>
       <Text style={styles.emptySubtitle}>
         {query
           ? `No calls match "${query}"`
           : selectedFolderName
-          ? `No audio recordings found in "${selectedFolderName}". You can choose another folder or scan again.`
-          : 'Automatic discovery searched Android MediaStore and OEM folders but found no recordings.'}
+          ? `No audio recordings found in "${selectedFolderName}". Select another folder or scan again.`
+          : 'Automatic discovery searched Android media folders but found no recordings.'}
       </Text>
       {!query && (
         <View style={styles.emptyActions}>
@@ -388,10 +435,11 @@ const EmptyState: React.FC<EmptyStateProps> = ({
             activeOpacity={0.8}
             accessibilityLabel="Select Recording Folder"
             accessibilityRole="button">
+            <Icon name="folder-search-outline" size={18} color={Colors.textInverse} style={styles.btnIcon} />
             <Text style={styles.selectFolderBtnText}>
               {selectedFolderName
-                ? '[ Change Recording Folder ]'
-                : '[ Select Recording Folder ]'}
+                ? 'Change Recording Folder'
+                : 'Select Recording Folder'}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -401,8 +449,14 @@ const EmptyState: React.FC<EmptyStateProps> = ({
             activeOpacity={0.8}
             accessibilityLabel="Scan device for recordings"
             accessibilityRole="button">
+            <Icon
+              name="refresh"
+              size={18}
+              color={Colors.primary}
+              style={[styles.btnIcon, isScanning && styles.rotatingIcon]}
+            />
             <Text style={styles.rescanBtnText}>
-              {isScanning ? '⟳ Scanning...' : '🔍 Scan Again'}
+              {isScanning ? 'Scanning...' : 'Scan Again'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -443,8 +497,21 @@ const CallsScreen: React.FC = () => {
 
   const isScanning = scanStatus === 'scanning';
   const hasDiscoveredRecordings = recordings.length > 0;
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Convert real discovered recordings into CallRecord format
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await scanRecordings();
+      toast.info('Refreshed', 'Call records loaded.');
+    } catch {
+      // Ignored in pull-to-refresh
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  // Real discovered recordings in CallRecord format
   const allCalls: CallRecord[] = useMemo(() => {
     if (hasDiscoveredRecordings) {
       return recordings.map(r =>
@@ -472,11 +539,10 @@ const CallsScreen: React.FC = () => {
     setMatchedOnlyFilter(false);
   };
 
-  // Full-Text Search and Multi-Dimensional Filter Engine (Phase 13)
+  // Full-Text Search and Multi-Dimensional Filter Engine
   const filteredCalls = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
-    // 1. Text & Transcript matching
     const searchMapped = allCalls.map(c => {
       let matchesSearch = true;
       let snippet: string | null = null;
@@ -502,24 +568,20 @@ const CallsScreen: React.FC = () => {
 
     let results = searchMapped.filter(item => item._matchesSearch);
 
-    // 2. Date filter
     if (dateFilter !== 'All') {
       results = results.filter(c => matchesDateFilter(c.date, dateFilter));
     }
 
-    // 3. Call type (Direction) filter
     if (typeFilter !== 'All') {
       results = results.filter(c => c.callType === typeFilter);
     }
 
-    // 4. Duration filter
     if (durationFilter !== 'All') {
       results = results.filter(c =>
         matchesDurationFilter(c.durationSeconds, durationFilter),
       );
     }
 
-    // 5. Processing Status filter
     if (statusFilter !== 'All') {
       results = results.filter(c => {
         const job = pipelineJobs[c.id];
@@ -527,7 +589,6 @@ const CallsScreen: React.FC = () => {
       });
     }
 
-    // 6. Matched Call Log only filter
     if (matchedOnlyFilter) {
       results = results.filter(c => Boolean(c.matchedWithCallLog));
     }
@@ -547,30 +608,34 @@ const CallsScreen: React.FC = () => {
   const handleScan = async () => {
     try {
       await scanRecordings();
+      toast.success('Scanner', 'Scan completed successfully');
     } catch (e: any) {
-      Alert.alert(
-        'Recording Scanner',
-        e?.message || 'Could not scan for recordings.',
-        [{text: 'OK'}],
-      );
+      showAlert({
+        title: 'Recording Scanner',
+        message: e?.message || 'Could not scan for recordings.',
+        variant: 'error',
+        buttons: [{text: 'OK'}],
+      });
     }
   };
 
   const handleSelectFolder = async () => {
     try {
       const folder = await selectFolder();
-      Alert.alert(
-        'Folder Configured',
-        `Access granted and persisted for "${folder.name}". Scanning for call recordings...`,
-        [{text: 'OK'}],
-      );
+      showAlert({
+        title: 'Folder Configured',
+        message: `Access granted and saved for "${folder.name}". Scanning for call recordings...`,
+        variant: 'success',
+        buttons: [{text: 'OK'}],
+      });
     } catch (e: any) {
       if (e?.message?.toLowerCase().includes('cancel')) return;
-      Alert.alert(
-        'Folder Selection',
-        e?.message || 'Could not access the selected folder.',
-        [{text: 'OK'}],
-      );
+      showAlert({
+        title: 'Folder Selection',
+        message: e?.message || 'Could not access the selected folder.',
+        variant: 'error',
+        buttons: [{text: 'OK'}],
+      });
     }
   };
 
@@ -594,8 +659,14 @@ const CallsScreen: React.FC = () => {
       {/* Selected SAF Folder Notice */}
       {selectedFolder && (
         <View style={styles.folderNotice}>
+          <Icon
+            name="folder-check-outline"
+            size={16}
+            color={Colors.primary}
+            style={styles.noticeIcon}
+          />
           <Text style={styles.folderNoticeText} numberOfLines={1}>
-            📁 {selectedFolder.name}
+            {selectedFolder.name}
           </Text>
           <TouchableOpacity
             onPress={handleSelectFolder}
@@ -603,22 +674,6 @@ const CallsScreen: React.FC = () => {
             accessibilityRole="button">
             <Text style={styles.folderChangeLink}>Change</Text>
           </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Discovery Status Notice */}
-      {hasDiscoveredRecordings ? (
-        <View style={styles.discoveredNotice}>
-          <Text style={styles.discoveredNoticeText}>
-            ✓ Found {recordings.length} call recording
-            {recordings.length !== 1 ? 's' : ''} (Phase 3 & 4)
-          </Text>
-        </View>
-      ) : (
-        <View style={styles.infoNotice}>
-          <Text style={styles.infoNoticeText}>
-            ⚡ Tap "Scan" or "[ Select Recording Folder ]" to discover recordings
-          </Text>
         </View>
       )}
 
@@ -642,7 +697,8 @@ const CallsScreen: React.FC = () => {
               activeOpacity={0.7}
               accessibilityLabel="Reset all filters"
               accessibilityRole="button">
-              <Text style={styles.resetFilterBtnText}>✕ Reset</Text>
+              <Icon name="close" size={12} color={Colors.textSecondary} style={{marginRight: 2}} />
+              <Text style={styles.resetFilterBtnText}>Reset</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
@@ -654,12 +710,18 @@ const CallsScreen: React.FC = () => {
             activeOpacity={0.7}
             accessibilityLabel="Toggle advanced filters"
             accessibilityRole="button">
+            <Icon
+              name={showAdvancedFilters ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color={showAdvancedFilters ? Colors.primary : Colors.textSecondary}
+              style={{marginRight: 3}}
+            />
             <Text
               style={[
                 styles.advancedFilterToggleText,
                 showAdvancedFilters && styles.advancedFilterToggleTextActive,
               ]}>
-              {showAdvancedFilters ? '▲ Less' : '▼ More Filters'}
+              {showAdvancedFilters ? 'Fewer' : 'More Filters'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -695,7 +757,7 @@ const CallsScreen: React.FC = () => {
         ))}
       </ScrollView>
 
-      {/* Expandable Advanced Filters (Phase 13) */}
+      {/* Expandable Advanced Filters */}
       {showAdvancedFilters && (
         <View style={styles.advancedFiltersBox}>
           {/* Duration Filters */}
@@ -712,7 +774,7 @@ const CallsScreen: React.FC = () => {
           </View>
 
           {/* Status Filters */}
-          <Text style={styles.subFilterHeading}>PIPELINE STATUS</Text>
+          <Text style={styles.subFilterHeading}>PROCESSING STATUS</Text>
           <View style={styles.subFilterRow}>
             {STATUS_FILTERS.map(sf => (
               <FilterChip
@@ -728,7 +790,8 @@ const CallsScreen: React.FC = () => {
           <Text style={styles.subFilterHeading}>VERIFICATION</Text>
           <View style={styles.subFilterRow}>
             <FilterChip
-              label="✓ Call Log Matched Only"
+              label="Call Log Matched"
+              iconName="check-decagram-outline"
               isActive={matchedOnlyFilter}
               onPress={() => setMatchedOnlyFilter(!matchedOnlyFilter)}
             />
@@ -753,10 +816,9 @@ const CallsScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" />
 
-      {/* ── Header ── */}
-      <View style={styles.header}>
-        <View style={styles.headerTitleRow}>
-          <Text style={styles.headerTitle}>Call Recordings</Text>
+      {/* ── Brand Header ── */}
+      <BrandHeader
+        rightAction={
           <TouchableOpacity
             style={[
               styles.headerScanBtn,
@@ -766,15 +828,33 @@ const CallsScreen: React.FC = () => {
             disabled={isScanning}
             accessibilityLabel="Scan for recordings"
             accessibilityRole="button">
+            <Icon
+              name="refresh"
+              size={15}
+              color={Colors.primary}
+              style={{marginRight: 4}}
+            />
             <Text style={styles.headerScanBtnText}>
-              {isScanning ? '⟳ Scanning...' : '🔍 Scan'}
+              {isScanning ? 'Scanning...' : 'Scan'}
             </Text>
           </TouchableOpacity>
+        }
+      />
+
+      {/* ── Header ── */}
+      <View style={styles.header}>
+        <View style={styles.headerTitleRow}>
+          <Text style={styles.headerTitle}>Call Recordings</Text>
         </View>
 
         {/* Search */}
         <View style={styles.searchBox}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <Icon
+            name="magnify"
+            size={20}
+            color={Colors.textTertiary}
+            style={styles.searchIcon}
+          />
           <TextInput
             style={styles.searchInput}
             placeholder="Search by name, phone, or transcript..."
@@ -791,7 +871,7 @@ const CallsScreen: React.FC = () => {
               onPress={() => setSearchQuery('')}
               accessibilityLabel="Clear search"
               accessibilityRole="button">
-              <Text style={styles.clearSearch}>✕</Text>
+              <Icon name="close-circle" size={18} color={Colors.textTertiary} />
             </TouchableOpacity>
           )}
         </View>
@@ -802,6 +882,14 @@ const CallsScreen: React.FC = () => {
         data={filteredCalls}
         keyExtractor={item => item.id}
         renderItem={renderItem}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            colors={[Colors.primary]}
+            tintColor={Colors.primary}
+          />
+        }
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={
           <EmptyState
@@ -816,6 +904,8 @@ const CallsScreen: React.FC = () => {
         }
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         ItemSeparatorComponent={() => <View style={styles.separator} />}
       />
     </SafeAreaView>
@@ -851,6 +941,8 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
   headerScanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: Colors.primaryLight,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.xs,
@@ -864,10 +956,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: FontSize.sm,
   },
+  noticeIcon: {
+    marginRight: Spacing.xs,
+  },
   folderNotice: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     backgroundColor: Colors.primaryLight,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
@@ -890,6 +984,9 @@ const styles = StyleSheet.create({
     marginLeft: Spacing.sm,
   },
   discoveredNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: Colors.successLight,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
@@ -902,9 +999,11 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.success,
     fontWeight: '600',
-    textAlign: 'center',
   },
   infoNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: Colors.surfaceSecondary,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
@@ -917,7 +1016,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.textSecondary,
     fontWeight: '500',
-    textAlign: 'center',
   },
   searchBox: {
     flexDirection: 'row',
@@ -930,7 +1028,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
   },
   searchIcon: {
-    fontSize: 16,
     marginRight: Spacing.sm,
   },
   searchInput: {
@@ -938,11 +1035,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.base,
     color: Colors.textPrimary,
     padding: 0,
-  },
-  clearSearch: {
-    fontSize: FontSize.sm,
-    color: Colors.textTertiary,
-    padding: Spacing.xs,
   },
 
   // List
@@ -956,31 +1048,14 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.md,
   },
 
-  // Mock notice
-  mockNotice: {
-    backgroundColor: Colors.warningLight,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    marginBottom: Spacing.md,
-    borderWidth: 1,
-    borderColor: Colors.warning,
-  },
-  mockNoticeText: {
-    fontSize: FontSize.xs,
-    color: Colors.warning,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-
   // Filters
-  filterSection: {
-    flexDirection: 'row',
+  filterScroll: {
+    paddingBottom: Spacing.sm,
     gap: Spacing.sm,
-    flexWrap: 'wrap',
-    marginBottom: Spacing.sm,
   },
   chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: Spacing.md,
     paddingVertical: 6,
     borderRadius: BorderRadius.full,
@@ -992,6 +1067,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     borderColor: Colors.primary,
   },
+  chipIcon: {
+    marginRight: 4,
+  },
   chipText: {
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
@@ -999,8 +1077,9 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: Colors.textInverse,
-    fontWeight: '600',
+    fontWeight: '700',
   },
+
   filterHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1016,16 +1095,18 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     fontWeight: '700',
     color: Colors.textPrimary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   activeFilterBadge: {
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
     paddingHorizontal: Spacing.sm,
     paddingVertical: 2,
     borderRadius: BorderRadius.full,
   },
   activeFilterBadgeText: {
-    color: Colors.textInverse,
-    fontSize: 10,
+    fontSize: FontSize.xs,
+    color: Colors.primary,
     fontWeight: '700',
   },
   filterControlsRow: {
@@ -1034,25 +1115,25 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   resetFilterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: Spacing.sm,
     paddingVertical: 4,
   },
   resetFilterBtnText: {
     fontSize: FontSize.xs,
-    color: Colors.error,
-    fontWeight: '700',
+    color: Colors.textSecondary,
+    fontWeight: '600',
   },
   advancedFilterToggle: {
-    paddingHorizontal: Spacing.sm + 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.sm,
     paddingVertical: 4,
     borderRadius: BorderRadius.sm,
-    backgroundColor: Colors.surfaceSecondary,
-    borderWidth: 1,
-    borderColor: Colors.border,
   },
   advancedFilterToggleActive: {
     backgroundColor: Colors.primaryLight,
-    borderColor: Colors.primary,
   },
   advancedFilterToggleText: {
     fontSize: FontSize.xs,
@@ -1063,84 +1144,57 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: '700',
   },
-  filterScroll: {
-    gap: Spacing.sm,
-    paddingBottom: Spacing.xs,
-    marginBottom: Spacing.xs,
-  },
   advancedFiltersBox: {
     backgroundColor: Colors.surfaceSecondary,
-    borderRadius: BorderRadius.lg,
+    borderRadius: BorderRadius.md,
     padding: Spacing.md,
-    marginTop: Spacing.xs,
     marginBottom: Spacing.sm,
     borderWidth: 1,
     borderColor: Colors.border,
-    gap: Spacing.xs,
   },
   subFilterHeading: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '800',
     color: Colors.textTertiary,
-    letterSpacing: 1,
+    letterSpacing: 0.8,
     marginTop: Spacing.xs,
-    marginBottom: 4,
+    marginBottom: Spacing.xs,
   },
   subFilterRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: Spacing.sm,
-    marginBottom: Spacing.xs,
+    gap: Spacing.xs,
+    marginBottom: Spacing.sm,
   },
   countRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: Spacing.xs,
-    marginBottom: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  countText: {
+    fontSize: FontSize.xs,
+    color: Colors.textTertiary,
+    fontWeight: '600',
   },
   filteredLabel: {
     fontSize: FontSize.xs,
     color: Colors.primary,
-    fontWeight: '700',
-  },
-  countText: {
-    fontSize: FontSize.sm,
-    color: Colors.textTertiary,
+    fontWeight: '600',
   },
 
-  // Call card
+  // Call Card
   callCard: {
     backgroundColor: Colors.surface,
     borderRadius: BorderRadius.lg,
-    padding: Spacing.base,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
     ...(Shadow.sm as object),
   },
   callCardMainRow: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  snippetContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.surfaceSecondary,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.sm + 2,
-    paddingVertical: 6,
-    marginTop: Spacing.sm,
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.primary,
-  },
-  snippetIcon: {
-    fontSize: 12,
-    marginRight: 6,
-  },
-  snippetText: {
-    flex: 1,
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    fontStyle: 'italic',
-    lineHeight: 16,
   },
   callCardLeft: {
     position: 'relative',
@@ -1185,10 +1239,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
-  callTypeArrow: {
-    fontSize: FontSize.base,
-    fontWeight: '700',
-  },
   callDuration: {
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
@@ -1201,19 +1251,25 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   callLogBadge: {
-    backgroundColor: Colors.successLight,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 0.5,
-    borderColor: Colors.success,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    marginTop: 3,
+    alignSelf: 'flex-end',
   },
   callLogBadgeText: {
     fontSize: 10,
-    color: Colors.success,
     fontWeight: '700',
+    letterSpacing: 0.2,
   },
   pipelineBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: Colors.primaryLight,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1224,6 +1280,24 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.primary,
     fontWeight: '700',
+  },
+  snippetContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surfaceSecondary,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    marginTop: Spacing.sm,
+  },
+  snippetIcon: {
+    marginRight: Spacing.xs,
+  },
+  snippetText: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    flex: 1,
+    lineHeight: 16,
   },
 
   // Separator
@@ -1237,9 +1311,16 @@ const styles = StyleSheet.create({
     paddingTop: Spacing['4xl'],
     paddingHorizontal: Spacing['2xl'],
   },
-  emptyIcon: {
-    fontSize: 56,
+  emptyIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.surfaceSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   emptyTitle: {
     fontSize: FontSize.xl,
@@ -1251,7 +1332,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.base,
     color: Colors.textSecondary,
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: 22,
   },
   emptyActions: {
     marginTop: Spacing.xl,
@@ -1259,7 +1340,15 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
   },
+  btnIcon: {
+    marginRight: Spacing.sm,
+  },
+  rotatingIcon: {
+    // animated or indicator
+  },
   selectFolderBtn: {
+    flexDirection: 'row',
+    justifyContent: 'center',
     backgroundColor: Colors.primary,
     borderRadius: BorderRadius.lg,
     paddingVertical: Spacing.md,
@@ -1275,6 +1364,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   rescanBtn: {
+    flexDirection: 'row',
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: Colors.primary,
     backgroundColor: Colors.surface,

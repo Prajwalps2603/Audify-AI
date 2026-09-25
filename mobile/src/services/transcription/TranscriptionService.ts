@@ -1,4 +1,4 @@
-// TeleCaller AI — Transcription Service (Phase 9)
+// TeleCaller AI — Transcription Service
 // Speech-to-Text client service supporting Google Cloud Speech-to-Text,
 // OpenAI Whisper, and Deepgram Nova-2 with diarization, timestamps,
 // and local persistent registry.

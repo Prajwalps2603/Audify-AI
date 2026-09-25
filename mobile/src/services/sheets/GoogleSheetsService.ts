@@ -1,4 +1,4 @@
-// TeleCaller AI — Google Sheets Service (Phase 8)
+// TeleCaller AI — Google Sheets Service
 // Manages Google Sheets OAuth authentication, spreadsheet discovery/creation,
 // duplicate protection, and automated row appending.
 
@@ -147,7 +147,7 @@ export class GoogleSheetsService {
     const spreadsheetId: string = createdSheet.spreadsheetId;
     const spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
 
-    // 4. Move spreadsheet into Google Drive "TeleCaller AI/Call Records" folder if available
+    // 4. Move spreadsheet into Google Drive "Audify AI/Call Records" folder if available
     try {
       const driveHierarchy = await GoogleDriveService.ensureFolderHierarchy();
       if (driveHierarchy?.callRecordsFolderId) {

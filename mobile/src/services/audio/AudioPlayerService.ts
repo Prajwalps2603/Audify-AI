@@ -1,4 +1,4 @@
-// TeleCaller AI — Audio Player Service (Phase 6)
+// TeleCaller AI — Audio Player Service
 // Interfaces with Android native MediaPlayer via AudioPlayerModule.
 
 import {NativeModules, NativeEventEmitter, Platform} from 'react-native';

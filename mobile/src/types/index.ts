@@ -66,7 +66,7 @@ export interface TranscriptSegment {
 }
 
 // ─────────────────────────────────────────────────────────────
-// User Profile (mock for Phase 1 — real auth in Phase 2)
+// User Profile
 // ─────────────────────────────────────────────────────────────
 
 export interface UserProfile {
@@ -127,7 +127,11 @@ export interface AppSettings {
 
 export type RootStackParamList = {
   Login: undefined;
+  OnboardingConsent: undefined;
   Main: undefined;
+  Profile: undefined;
+  AdminSettings: undefined;
+  ModelTierDetails: {modelId: string};
 };
 
 export type MainTabParamList = {

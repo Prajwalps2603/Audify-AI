@@ -1,4 +1,4 @@
-// TeleCaller AI — Google Drive Service (Phase 7)
+// TeleCaller AI — Google Drive Service
 // Manages Google Drive OAuth authentication, folder structure,
 // duplicate prevention, and audio recording upload.
 
@@ -144,7 +144,7 @@ export class GoogleDriveService {
 
   /**
    * Ensures the mandatory folder structure:
-   * TeleCaller AI/
+   * Audify AI/
    *   Recordings/
    *     YYYY/
    *       MM/
@@ -159,8 +159,8 @@ export class GoogleDriveService {
     dateFolderId: string;
     callRecordsFolderId: string;
   }> {
-    // 1. Root folder: "TeleCaller AI"
-    const rootFolderId = await this.getOrCreateFolder('TeleCaller AI');
+    // 1. Root folder: "Audify AI"
+    const rootFolderId = await this.getOrCreateFolder('Audify AI');
 
     // 2. "Call Records" folder
     const callRecordsFolderId = await this.getOrCreateFolder(

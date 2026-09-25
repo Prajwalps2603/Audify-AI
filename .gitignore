@@ -1,4 +1,4 @@
-# TeleCaller AI — Root .gitignore
+# Audify AI — Root .gitignore
 
 # Environment secrets — NEVER commit
 .env
@@ -25,7 +25,12 @@ mobile/.bundle/vendor/
 # ─── Server ──────────────────────────────────────────────────────
 server/node_modules/
 server/dist/
+server/data/
 server/*.log
+# HTTPS — self-signed dev certs (auto-generated, never commit)
+server/.dev-certs/
+# Greenlock — Let's Encrypt cert storage (sensitive, never commit)
+server/.greenlock/
 
 # ─── General ─────────────────────────────────────────────────────
 node_modules/

@@ -1,4 +1,4 @@
-// TeleCaller AI — Google Sheets Types (Phase 8)
+// TeleCaller AI — Google Sheets Types
 
 export type SheetsConnectionStatus =
   | 'connected'
@@ -32,7 +32,7 @@ export interface SpreadsheetInfo {
 }
 
 export const SHEETS_CONFIG = {
-  SPREADSHEET_TITLE: 'TeleCaller AI - Call Records',
+  SPREADSHEET_TITLE: 'Audify AI - Call Records',
   SHEET_NAME: 'Call Records',
   HEADERS: [
     'Call ID',           // Col A

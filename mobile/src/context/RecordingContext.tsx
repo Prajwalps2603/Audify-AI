@@ -1,4 +1,4 @@
-// TeleCaller AI — Recording Context (Phase 3 & Phase 4)
+// TeleCaller AI — Recording Context
 // Provides global state for discovered recordings, SAF folder selection, and persistence.
 
 import React, {
@@ -106,7 +106,7 @@ export const RecordingProvider: React.FC<{children: React.ReactNode}> = ({
     }
   }, []);
 
-  // Phase 4: Select folder via Storage Access Framework
+  // Select folder via Storage Access Framework
   const selectFolder = useCallback(async (): Promise<SelectedFolder> => {
     setStatus('scanning');
     setErrorMessage(null);
@@ -140,18 +140,18 @@ export const RecordingProvider: React.FC<{children: React.ReactNode}> = ({
     }
   }, []);
 
-  // Phase 4: Change folder (alias for re-selecting folder)
+  // Change folder (alias for re-selecting folder)
   const changeFolder = useCallback(async (): Promise<SelectedFolder> => {
     return await selectFolder();
   }, [selectFolder]);
 
-  // Phase 4: Clear persisted folder
+  // Clear persisted folder
   const clearSelectedFolder = useCallback(async () => {
     await RecordingScannerService.clearPersistedFolder();
     setSelectedFolder(null);
   }, []);
 
-  // Phase 4: Scan specifically the currently selected folder
+  // Scan specifically the currently selected folder
   const scanSelectedFolder = useCallback(async () => {
     if (!selectedFolder) {
       await scanRecordings();

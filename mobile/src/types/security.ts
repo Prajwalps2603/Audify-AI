@@ -1,4 +1,4 @@
-// TeleCaller AI — Security & Privacy Audit Types (Phase 14)
+// TeleCaller AI — Security & Privacy Audit Types
 
 export type SecurityCheckStatus = 'PASS' | 'WARN' | 'FAIL';
 

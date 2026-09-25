@@ -1,8 +1,7 @@
-// TeleCaller AI — Security & Privacy Audit Modal (Phase 14)
-// Interactive live security inspector visualizing KeyStore integrity,
-// storage hygiene, scoped storage compliance, OAuth token health, and TLS transport security.
+// TeleCaller AI — Security & Privacy Audit Modal
+// Real-time verification of local hardware security, sandbox containment, and API configuration.
 
-import React, {useState, useEffect, useCallback} from 'react';
+import React, {useState, useEffect} from 'react';
 import {
   Modal,
   View,
@@ -11,12 +10,16 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Platform,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {Colors, FontSize, BorderRadius, Spacing, Shadow} from '../../theme';
-import {SecurityAuditReport, SecurityCheckItem, SecurityCheckStatus} from '../../types/security';
-import {SecurityAuditService} from '../../services/security/SecurityAuditService';
+import {
+  SecurityAuditService,
+  SecurityAuditReport,
+  SecurityCheckItem,
+  AuditStatus,
+} from '../../services/security/SecurityAuditService';
 
 interface SecurityAuditModalProps {
   visible: boolean;
@@ -31,29 +34,29 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const executeAudit = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const result = await SecurityAuditService.runAudit();
-      setReport(result);
-    } catch {
-      // Keep previous report if error occurs
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     if (visible) {
       executeAudit();
     }
-  }, [visible, executeAudit]);
+  }, [visible]);
+
+  const executeAudit = async () => {
+    setIsLoading(true);
+    try {
+      const result = await SecurityAuditService.runFullAudit();
+      setReport(result);
+    } catch (e) {
+      console.error('Audit execution error:', e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const toggleExpand = (id: string) => {
     setExpandedId(prev => (prev === id ? null : id));
   };
 
-  const getStatusColor = (status: SecurityCheckStatus) => {
+  const getStatusColor = (status: AuditStatus) => {
     switch (status) {
       case 'PASS':
         return {
@@ -73,23 +76,29 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
           border: '#FCA5A5',
           text: '#B91C1C',
         };
+      default:
+        return {
+          bg: '#DCFCE7',
+          border: '#86EFAC',
+          text: '#15803D',
+        };
     }
   };
 
-  const getCategoryIcon = (category: string) => {
+  const getCategoryIcon = (category: string): {icon: string; color: string} => {
     switch (category) {
       case 'STORAGE':
-        return '💾';
+        return {icon: 'harddisk', color: Colors.primary};
       case 'AUTH':
-        return '🔐';
+        return {icon: 'key-outline', color: '#8B5CF6'};
       case 'PERMISSIONS':
-        return '🛡️';
+        return {icon: 'shield-check-outline', color: '#10B981'};
       case 'NETWORK':
-        return '🌐';
+        return {icon: 'web', color: '#06B6D4'};
       case 'PRIVACY':
-        return '👁️';
+        return {icon: 'eye-outline', color: '#F59E0B'};
       default:
-        return '🔍';
+        return {icon: 'magnify', color: Colors.textSecondary};
     }
   };
 
@@ -113,7 +122,7 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
               style={styles.closeButton}
               onPress={onClose}
               hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
-              <Text style={styles.closeButtonText}>✕</Text>
+              <Icon name="close" size={20} color={Colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
@@ -140,21 +149,24 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
                     </Text>
                     <View style={styles.countersRow}>
                       <View style={[styles.counterPill, {backgroundColor: '#DCFCE7'}]}>
+                        <Icon name="check" size={12} color="#15803D" style={{marginRight: 3}} />
                         <Text style={[styles.counterText, {color: '#15803D'}]}>
-                          ✓ {report.passedChecks} Passed
+                          {report.passedChecks} Passed
                         </Text>
                       </View>
                       {report.warnChecks > 0 && (
                         <View style={[styles.counterPill, {backgroundColor: '#FEF3C7'}]}>
+                          <Icon name="alert-outline" size={12} color="#B45309" style={{marginRight: 3}} />
                           <Text style={[styles.counterText, {color: '#B45309'}]}>
-                            ⚠ {report.warnChecks} Warn
+                            {report.warnChecks} Warn
                           </Text>
                         </View>
                       )}
                       {report.failedChecks > 0 && (
                         <View style={[styles.counterPill, {backgroundColor: '#FEE2E2'}]}>
+                          <Icon name="close" size={12} color="#B91C1C" style={{marginRight: 3}} />
                           <Text style={[styles.counterText, {color: '#B91C1C'}]}>
-                            ✕ {report.failedChecks} Fail
+                            {report.failedChecks} Fail
                           </Text>
                         </View>
                       )}
@@ -174,6 +186,7 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
             {report?.items.map((item: SecurityCheckItem) => {
               const statusColors = getStatusColor(item.status);
               const isExpanded = expandedId === item.id;
+              const catIcon = getCategoryIcon(item.category);
 
               return (
                 <TouchableOpacity
@@ -183,7 +196,9 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
                   onPress={() => toggleExpand(item.id)}>
                   <View style={styles.itemHeader}>
                     <View style={styles.itemTitleRow}>
-                      <Text style={styles.itemIcon}>{getCategoryIcon(item.category)}</Text>
+                      <View style={styles.categoryIconCircle}>
+                        <Icon name={catIcon.icon} size={18} color={catIcon.color} />
+                      </View>
                       <View style={styles.itemTitleContainer}>
                         <Text style={styles.itemTitle}>{item.title}</Text>
                         <Text style={styles.itemCategory}>{item.category}</Text>
@@ -218,8 +233,14 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
                   )}
 
                   <View style={styles.itemFooter}>
+                    <Icon
+                      name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                      size={14}
+                      color={Colors.primary}
+                      style={{marginRight: 4}}
+                    />
                     <Text style={styles.expandHint}>
-                      {isExpanded ? '▲ Hide technical details' : '▼ View technical details'}
+                      {isExpanded ? 'Hide technical details' : 'View technical details'}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -236,7 +257,10 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
               {isLoading ? (
                 <ActivityIndicator size="small" color={Colors.textInverse} />
               ) : (
-                <Text style={styles.rescanButtonText}>🔄 Re-run Security Audit</Text>
+                <View style={styles.btnContentRow}>
+                  <Icon name="refresh" size={18} color={Colors.textInverse} style={{marginRight: 6}} />
+                  <Text style={styles.rescanButtonText}>Re-run Security Audit</Text>
+                </View>
               )}
             </TouchableOpacity>
           </View>
@@ -263,15 +287,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.lg,
-    paddingBottom: Spacing.md,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.lg,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: BorderRadius.xl,
+    borderTopRightRadius: BorderRadius.xl,
   },
   title: {
     fontSize: FontSize.lg,
-    fontWeight: '700',
+    fontWeight: '800',
     color: Colors.textPrimary,
   },
   subtitle: {
@@ -283,26 +309,22 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: Colors.border,
-    alignItems: 'center',
+    backgroundColor: Colors.surfaceSecondary,
     justifyContent: 'center',
-  },
-  closeButtonText: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    fontWeight: '600',
+    alignItems: 'center',
   },
   scrollContent: {
     flex: 1,
   },
   scrollInner: {
-    padding: Spacing.lg,
-    gap: Spacing.md,
+    padding: Spacing.xl,
+    paddingBottom: Spacing['3xl'],
   },
   scoreCard: {
     backgroundColor: Colors.surface,
     borderRadius: BorderRadius.lg,
-    padding: Spacing.md,
+    padding: Spacing.lg,
+    marginBottom: Spacing.xl,
     borderWidth: 1,
     borderColor: Colors.border,
     ...Shadow.sm,
@@ -312,32 +334,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   scoreBadge: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#EEF2FF',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#EFF6FF',
     borderWidth: 2,
     borderColor: Colors.primary,
-    alignItems: 'center',
     justifyContent: 'center',
-    marginRight: Spacing.md,
+    alignItems: 'center',
+    marginRight: Spacing.lg,
   },
   scoreValue: {
-    fontSize: FontSize.xl,
-    fontWeight: '800',
+    fontSize: FontSize['2xl'],
+    fontWeight: '900',
     color: Colors.primary,
   },
   scoreSubtext: {
-    fontSize: 9,
-    fontWeight: '700',
+    fontSize: 8,
+    fontWeight: '800',
     color: Colors.primary,
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
   },
   scoreDetails: {
     flex: 1,
   },
   scoreStatusTitle: {
-    fontSize: FontSize.md,
+    fontSize: FontSize.base,
     fontWeight: '700',
     color: Colors.textPrimary,
     marginBottom: 2,
@@ -345,46 +367,49 @@ const styles = StyleSheet.create({
   scoreTimestamp: {
     fontSize: FontSize.xs,
     color: Colors.textTertiary,
-    marginBottom: 6,
+    marginBottom: Spacing.sm,
   },
   countersRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: Spacing.xs,
+    flexWrap: 'wrap',
   },
   counterPill: {
-    paddingHorizontal: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.sm,
     paddingVertical: 3,
-    borderRadius: 12,
+    borderRadius: BorderRadius.sm,
   },
   counterText: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   sectionHeadingRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: Spacing.xs,
+    marginBottom: Spacing.md,
   },
   sectionHeadingText: {
     fontSize: FontSize.xs,
-    fontWeight: '700',
-    color: Colors.textTertiary,
+    fontWeight: '800',
+    color: Colors.textSecondary,
     letterSpacing: 0.8,
   },
   itemCard: {
     backgroundColor: Colors.surface,
     borderRadius: BorderRadius.md,
     padding: Spacing.md,
+    marginBottom: Spacing.sm,
     borderWidth: 1,
     borderColor: Colors.border,
-    ...Shadow.sm,
   },
   itemHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 6,
+    marginBottom: Spacing.xs,
   },
   itemTitleRow: {
     flexDirection: 'row',
@@ -392,8 +417,13 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: Spacing.sm,
   },
-  itemIcon: {
-    fontSize: 20,
+  categoryIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.surfaceSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: Spacing.sm,
   },
   itemTitleContainer: {
@@ -412,50 +442,52 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
     borderWidth: 1,
   },
   statusBadgeText: {
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 0.5,
   },
   itemDescription: {
     fontSize: FontSize.xs,
     color: Colors.textSecondary,
     lineHeight: 18,
+    marginTop: 4,
   },
   detailsContainer: {
     marginTop: Spacing.sm,
     padding: Spacing.sm,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: Colors.surfaceSecondary,
     borderRadius: BorderRadius.sm,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.primary,
   },
   detailsLabel: {
     fontSize: 9,
-    fontWeight: '700',
-    color: '#64748B',
+    fontWeight: '800',
+    color: Colors.textTertiary,
     letterSpacing: 0.5,
-    marginBottom: 3,
+    marginBottom: 2,
   },
   detailsText: {
-    fontSize: FontSize.xs,
-    color: '#334155',
+    fontSize: 11,
+    color: Colors.textPrimary,
+    fontFamily: 'monospace',
     lineHeight: 16,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   itemFooter: {
-    marginTop: 6,
-    alignItems: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: Spacing.xs,
+    paddingTop: 4,
   },
   expandHint: {
-    fontSize: 10,
-    color: Colors.primary,
+    fontSize: 11,
     fontWeight: '600',
+    color: Colors.primary,
   },
   footer: {
     padding: Spacing.lg,
@@ -465,15 +497,20 @@ const styles = StyleSheet.create({
   },
   rescanButton: {
     backgroundColor: Colors.primary,
-    paddingVertical: Spacing.md,
     borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
     ...Shadow.sm,
   },
+  btnContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   rescanButtonText: {
     color: Colors.textInverse,
-    fontSize: FontSize.sm,
+    fontSize: FontSize.base,
     fontWeight: '700',
   },
 });

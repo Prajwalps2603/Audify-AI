@@ -1,4 +1,4 @@
-// TeleCaller AI — Background Processing & Automation Types (Phase 12)
+// TeleCaller AI — Background Processing & Automation Types
 
 export interface BackgroundSettings {
   /** Master background automation switch */

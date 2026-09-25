@@ -1,4 +1,4 @@
-// TeleCaller AI — Security & Privacy Audit Service (Phase 14)
+// TeleCaller AI — Security & Privacy Audit Service
 // Performs automated diagnostics verifying:
 // 1. Android KeyStore hardware-backed encryption (react-native-encrypted-storage)
 // 2. Local storage credential leakage prevention (AsyncStorage hygiene)
@@ -13,6 +13,8 @@ import {Platform, NativeModules} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import EncryptedStorage from 'react-native-encrypted-storage';
 import {SecurityAuditReport, SecurityCheckItem, SecurityCheckStatus} from '../../types/security';
+export type {SecurityAuditReport, SecurityCheckItem, SecurityCheckStatus};
+export type AuditStatus = SecurityCheckStatus;
 import {restoreSession, getValidAccessToken} from '../auth/AuthService';
 import {RecordingScannerService} from '../scanner/RecordingScannerService';
 
@@ -32,6 +34,10 @@ export class SecurityAuditService {
   /**
    * Run the full security and privacy audit suite.
    */
+  static runFullAudit(): Promise<SecurityAuditReport> {
+    return this.runAudit();
+  }
+
   static async runAudit(): Promise<SecurityAuditReport> {
     const items: SecurityCheckItem[] = [];
 
@@ -265,7 +271,7 @@ export class SecurityAuditService {
         title: 'Permission Integrity',
         status: 'FAIL',
         description: 'Audio recording storage permission not granted.',
-        details: 'TeleCaller cannot scan or access call recording files until storage/audio permission is granted.',
+        details: 'Audify AI cannot scan or access call recording files until storage/audio permission is granted.',
       };
     } catch (e: any) {
       return {
@@ -343,7 +349,7 @@ export class SecurityAuditService {
       status: 'PASS',
       description: 'Restricted drive.file & spreadsheets scopes enforced.',
       details:
-        'TeleCaller AI never requests full Google Drive root access. Permissions are restricted strictly to app-created recordings and the user-specified CRM spreadsheet.',
+        'Audify AI never requests full Google Drive root access. Permissions are restricted strictly to app-created recordings and the user-specified CRM spreadsheet.',
     };
   }
 
@@ -403,7 +409,7 @@ export class SecurityAuditService {
         status: 'WARN',
         description: 'Battery optimization may throttle background scanning.',
         details:
-          'Android may delay background scanning when the screen is off. You can exempt TeleCaller AI in Settings → Battery.',
+          'Android may delay background scanning when the screen is off. You can exempt Audify AI in Settings → Battery.',
       };
     } catch {
       return {

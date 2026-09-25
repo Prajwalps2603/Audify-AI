@@ -77,7 +77,7 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.telecallerai"
+    namespace "com.audifyai"
     defaultConfig {
         applicationId "com.telecallerai"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -87,11 +87,11 @@ android {
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=c++_shared", "-DANDROID_CPP_FEATURES=rtti exceptions"
-                cppFlags "-frtti -fexceptions -std=c++20"
+                cppFlags "-frtti -fexceptions -std=c++17"
             }
         }
         ndk {
-            abiFilters "arm64-v8a"
+            abiFilters (*findProperty('reactNativeArchitectures')?.split(',') ?: ["arm64-v8a", "armeabi-v7a", "x86_64"])
         }
     }
     signingConfigs {
@@ -105,6 +105,7 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+            manifestPlaceholders = [usesCleartextTraffic: "true"]
         }
         release {
             // Caution! In production, you need to generate your own keystore file.
@@ -112,6 +113,7 @@ android {
             signingConfig signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            manifestPlaceholders = [usesCleartextTraffic: "false"]
         }
     }
 }

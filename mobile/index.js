@@ -1,5 +1,5 @@
 /**
- * TeleCaller AI — App Entry Point
+ * Audify AI — App Entry Point
  * @format
  */
 

@@ -1,4 +1,4 @@
-// TeleCaller AI — Transcription Types (Phase 9)
+// TeleCaller AI — Transcription Types
 
 import {TranscriptSegment, SpeakerRole} from './index';
 

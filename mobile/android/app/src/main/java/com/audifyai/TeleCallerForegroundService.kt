@@ -1,4 +1,4 @@
-package com.telecallerai
+package com.audifyai
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -17,8 +17,8 @@ class TeleCallerForegroundService : Service() {
     companion object {
         const val CHANNEL_ID = "telecaller_background_channel"
         const val NOTIFICATION_ID = 1001
-        const val ACTION_START = "com.telecallerai.ACTION_START"
-        const val ACTION_STOP = "com.telecallerai.ACTION_STOP"
+        const val ACTION_START = "com.audifyai.ACTION_START"
+        const val ACTION_STOP = "com.audifyai.ACTION_STOP"
         const val EXTRA_TITLE = "extra_title"
         const val EXTRA_MESSAGE = "extra_message"
         var isRunning = false
@@ -38,7 +38,7 @@ class TeleCallerForegroundService : Service() {
             return START_NOT_STICKY
         }
 
-        val title = intent?.getStringExtra(EXTRA_TITLE) ?: "TeleCaller AI"
+        val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Audify AI"
         val message = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Background call monitor active"
 
         val notification = buildNotification(title, message)
@@ -76,7 +76,7 @@ class TeleCallerForegroundService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "TeleCaller Background Monitor",
+                "Audify AI Background Monitor",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Monitors newly recorded calls and automates cloud sync and transcription."

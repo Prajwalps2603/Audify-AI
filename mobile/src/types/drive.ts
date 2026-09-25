@@ -1,4 +1,4 @@
-// TeleCaller AI — Google Drive Types (Phase 7)
+// TeleCaller AI — Google Drive Types
 
 export type DriveConnectionStatus = 'connected' | 'not_connected' | 'checking';
 

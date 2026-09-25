@@ -1,3 +1,6 @@
+// TeleCaller AI — Home Screen
+// Premium dashboard with gradient hero, animated stat cards, and pipeline controls.
+
 import React, {useState, useMemo, useEffect} from 'react';
 import {
   View,
@@ -8,17 +11,18 @@ import {
   StatusBar,
   Dimensions,
   RefreshControl,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
+import LinearGradient from 'react-native-linear-gradient';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {Colors, FontSize, BorderRadius, Shadow, Spacing} from '../../theme';
-import {MOCK_CALLS, MOCK_STATS} from '../../mock/mockData';
 import {CallRecord, DashboardStats} from '../../types';
 import Avatar from '../../components/Avatar';
 import StatusBadge from '../../components/StatusBadge';
 import Card from '../../components/Card';
+import BrandHeader from '../../components/BrandHeader';
 import {useAuth} from '../../context/AuthContext';
 import {useRecordings} from '../../context/RecordingContext';
 import {RecordingScannerService} from '../../services/scanner/RecordingScannerService';
@@ -26,12 +30,14 @@ import {PipelineService} from '../../services/pipeline/PipelineService';
 import {PipelineJob} from '../../types/pipeline';
 import {BackgroundProcessingService} from '../../services/background/BackgroundProcessingService';
 import {BackgroundSettings} from '../../types/background';
+import {toast} from '../../components/Toast';
+import {showAlert} from '../../components/AppModal';
 
 const {width} = Dimensions.get('window');
 const CARD_WIDTH = (width - Spacing.xl * 2 - Spacing.md) / 2;
 
 // ─────────────────────────────────────────────────────────────
-// Stat Card
+// Stat Card (Premium)
 // ─────────────────────────────────────────────────────────────
 interface StatCardProps {
   label: string;
@@ -39,8 +45,23 @@ interface StatCardProps {
   subtitle?: string;
   color: string;
   bgColor: string;
-  icon: string;
+  iconName: string;
 }
+
+const getCardTag = (label: string): string => {
+  switch (label.toLowerCase()) {
+    case 'total calls':
+      return 'All recordings';
+    case 'today':
+      return 'Activity today';
+    case 'processed':
+      return 'Uploaded & transcribed';
+    case 'pending':
+      return 'Awaiting action';
+    default:
+      return 'Live metrics';
+  }
+};
 
 const StatCard: React.FC<StatCardProps> = ({
   label,
@@ -48,21 +69,56 @@ const StatCard: React.FC<StatCardProps> = ({
   subtitle,
   color,
   bgColor,
-  icon,
-}) => (
-  <View style={[styles.statCard, {backgroundColor: Colors.surface}]}>
-    <View style={[styles.statIconBox, {backgroundColor: bgColor}]}>
-      <Text style={styles.statIcon}>{icon}</Text>
-    </View>
-    <Text style={[styles.statValue, {color}]}>{value}</Text>
-    <Text style={styles.statLabel}>{label}</Text>
-    {subtitle ? (
-      <Text style={[styles.statSubtitle, {color: Colors.success}]}>
-        {subtitle}
+  iconName,
+}) => {
+  const numVal = typeof value === 'number' ? value : parseInt(value, 10) || 0;
+  const fillPercent =
+    numVal > 0 ? (numVal > 10 ? '90%' : `${Math.max(30, numVal * 10)}%`) : '18%';
+
+  return (
+    <View style={[styles.statCard, {borderColor: color + '35'}]}>
+      {/* ── Top row: Icon on left + Count right next to it ── */}
+      <View style={styles.statTopRow}>
+        <View style={styles.statIconAndCount}>
+          <View style={[styles.statIconBox, {backgroundColor: bgColor}]}>
+            <Icon name={iconName} size={18} color={color} />
+          </View>
+          <Text style={[styles.statValue, {color}]}>{value}</Text>
+        </View>
+
+        {subtitle ? (
+          <View style={styles.statTrendBadge}>
+            <Text style={styles.statTrendText}>{subtitle}</Text>
+          </View>
+        ) : (
+          <View style={[styles.statPulseDot, {backgroundColor: color + '25'}]}>
+            <View style={[styles.statPulseDotInner, {backgroundColor: color}]} />
+          </View>
+        )}
+      </View>
+
+      {/* ── Below that: Label ── */}
+      <Text style={styles.statLabel} numberOfLines={1}>
+        {label}
       </Text>
-    ) : null}
-  </View>
-);
+
+      {/* ── Creative bottom micro-accent (No unwanted empty space) ── */}
+      <View style={styles.statBottomSection}>
+        <Text style={styles.statTagText} numberOfLines={1}>
+          {getCardTag(label)}
+        </Text>
+        <View style={[styles.statTrackBar, {backgroundColor: color + '18'}]}>
+          <View
+            style={[
+              styles.statFillBar,
+              {backgroundColor: color, width: fillPercent},
+            ]}
+          />
+        </View>
+      </View>
+    </View>
+  );
+};
 
 // ─────────────────────────────────────────────────────────────
 // Recent Call Row
@@ -93,13 +149,11 @@ const RecentCallRow: React.FC<RecentCallRowProps> = ({call, onPress}) => {
       <View style={styles.recentRight}>
         <Text style={styles.recentTime}>{call.time}</Text>
         <View style={styles.recentMeta}>
-          <Text
-            style={[
-              styles.callTypeArrow,
-              {color: isIncoming ? Colors.success : Colors.primary},
-            ]}>
-            {isIncoming ? '↙' : '↗'}
-          </Text>
+          <Icon
+            name={isIncoming ? 'phone-incoming' : 'phone-outgoing'}
+            size={14}
+            color={isIncoming ? Colors.success : Colors.primary}
+          />
           <Text style={styles.recentDuration}>{call.duration}</Text>
         </View>
         <StatusBadge status={call.status} size="sm" />
@@ -129,7 +183,13 @@ const ScanBanner: React.FC<ScanBannerProps> = ({
     activeOpacity={0.85}
     accessibilityLabel={scanning ? 'Scanning...' : 'Scan for new recordings'}
     accessibilityRole="button">
-    <Text style={styles.scanIcon}>{scanning ? '⟳' : '🔍'}</Text>
+    <View style={styles.scanIconContainer}>
+      {scanning ? (
+        <ActivityIndicator size="small" color={Colors.textInverse} />
+      ) : (
+        <Icon name={totalFound > 0 ? 'refresh' : 'magnify'} size={24} color={Colors.textInverse} />
+      )}
+    </View>
     <View style={styles.scanContent}>
       <Text style={styles.scanTitle}>
         {scanning
@@ -140,10 +200,10 @@ const ScanBanner: React.FC<ScanBannerProps> = ({
       </Text>
       <Text style={styles.scanSubtitle}>
         {scanning
-          ? 'Searching MediaStore & OEM recording folders...'
+          ? 'Searching device storage for call audio files...'
           : totalFound > 0
           ? 'Tap to re-scan for new call audio files'
-          : 'Tap to scan MediaStore & known system folders'}
+          : 'Tap to scan device storage for recordings'}
       </Text>
     </View>
   </TouchableOpacity>
@@ -193,47 +253,75 @@ const HomeScreen: React.FC = () => {
     };
   }, []);
 
-  // Real stats if recordings are discovered, otherwise mock stats
-  const stats = useMemo(() => {
-    if (hasDiscoveredRecordings) {
-      const todayStr = new Date().toDateString();
-      const todayCount = recordings.filter(
-        r => new Date(r.timestamp).toDateString() === todayStr,
-      ).length;
+  // Auto-sync recordings on first launch
+  useEffect(() => {
+    let cancelled = false;
+    const autoSync = async () => {
+      try {
+        await scanRecordings();
+      } catch {
+        // silently ignore auto-sync errors on launch
+      }
+    };
+    autoSync();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-      let completed = 0;
-      let failed = 0;
-      let inProgress = 0;
-
-      recordings.forEach(rec => {
-        const job = pipelineJobs[rec.id];
-        if (job) {
-          if (job.stage === 'COMPLETED') completed++;
-          else if (job.stage === 'FAILED') failed++;
-          else inProgress++;
-        }
-      });
-
-      const pending = Math.max(
-        0,
-        totalDiscovered - completed - inProgress - failed,
-      );
-
-      return {
-        totalCalls: totalDiscovered,
-        totalGrowthPercent: 100,
-        todayCalls: todayCount,
-        processedCalls: completed,
-        pendingCalls: pending,
-        failedCalls: failed,
-      };
+  // Show toast when scan finishes
+  const prevScanStatus = React.useRef<string>(scanStatus);
+  useEffect(() => {
+    if (prevScanStatus.current === 'scanning' && scanStatus === 'idle') {
+      if (recordings.length > 0) {
+        toast.info(
+          'Recordings Synced',
+          `Found ${recordings.length} call recording${recordings.length !== 1 ? 's' : ''} on device`,
+        );
+      }
     }
-    return MOCK_STATS;
+    prevScanStatus.current = scanStatus;
+  }, [scanStatus, recordings.length]);
+
+  // Compute stats from real discovered recordings
+  const stats: DashboardStats = useMemo(() => {
+    const todayStr = new Date().toDateString();
+    const todayCount = hasDiscoveredRecordings
+      ? recordings.filter(
+          r => new Date(r.timestamp).toDateString() === todayStr,
+        ).length
+      : 0;
+
+    let completed = 0;
+    let failed = 0;
+    let inProgress = 0;
+
+    recordings.forEach(rec => {
+      const job = pipelineJobs[rec.id];
+      if (job) {
+        if (job.stage === 'COMPLETED') completed++;
+        else if (job.stage === 'FAILED') failed++;
+        else inProgress++;
+      }
+    });
+
+    const pending = Math.max(
+      0,
+      totalDiscovered - completed - inProgress - failed,
+    );
+
+    return {
+      totalCalls: totalDiscovered,
+      totalGrowthPercent: totalDiscovered > 0 ? 100 : 0,
+      todayCalls: todayCount,
+      processedCalls: completed,
+      pendingCalls: pending,
+      failedCalls: failed,
+    };
   }, [hasDiscoveredRecordings, totalDiscovered, recordings, pipelineJobs]);
 
   const handleRunPipeline = async () => {
     if (recordings.length === 0) {
-      Alert.alert('Pipeline', 'Please scan for recordings first.');
+      toast.warning('No Recordings', 'Please scan for recordings first.');
       return;
     }
     setIsProcessingPipeline(true);
@@ -242,27 +330,26 @@ const HomeScreen: React.FC = () => {
       await PipelineService.processAllPending(recordings, (done, total) => {
         setPipelineProgressText(`Processing calls: ${done}/${total} complete`);
       });
-      Alert.alert(
+      toast.success(
         'Pipeline Complete',
-        'Successfully processed pending recordings through Google Drive, AI Transcription, and Google Sheets!',
-        [{text: 'OK'}],
+        'All recordings processed through Drive, AI Transcription, and Sheets.',
       );
     } catch (e: any) {
-      Alert.alert('Pipeline Error', e?.message || 'Error executing pipeline.');
+      toast.error('Pipeline Error', e?.message || 'Error executing pipeline.');
     } finally {
       setIsProcessingPipeline(false);
       setPipelineProgressText('');
     }
   };
 
-  // Display calls: real discovered recordings if available, otherwise mock
+  // Display calls from real discovered recordings
   const recentCalls: CallRecord[] = useMemo(() => {
     if (hasDiscoveredRecordings) {
       return recordings
         .slice(0, 4)
         .map(r => RecordingScannerService.discoveredToCallRecord(r));
     }
-    return MOCK_CALLS.slice(0, 4);
+    return [];
   }, [hasDiscoveredRecordings, recordings]);
 
   const getGreeting = (): string => {
@@ -286,10 +373,9 @@ const HomeScreen: React.FC = () => {
     try {
       await scanRecordings();
     } catch (e: any) {
-      Alert.alert(
-        'Recording Scanner',
+      toast.error(
+        'Scan Failed',
         e?.message || 'Could not scan for call recordings.',
-        [{text: 'OK'}],
       );
     }
   };
@@ -304,6 +390,16 @@ const HomeScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" />
+      <BrandHeader
+        rightAction={
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Settings')}
+            accessibilityLabel="Open profile settings"
+            accessibilityRole="button">
+            <Avatar name={displayName} photoUrl={displayPhotoUrl} size={36} />
+          </TouchableOpacity>
+        }
+      />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -316,39 +412,24 @@ const HomeScreen: React.FC = () => {
             colors={[Colors.primary]}
           />
         }>
-        {/* ── Header ── */}
-        <View style={styles.headerRow}>
-          <View style={styles.headerLeft}>
-            <Text style={styles.greeting}>{getGreeting()},</Text>
-            <Text style={styles.userName} numberOfLines={1}>
-              {displayName.split(' ')[0]} 👋
-            </Text>
-            <Text style={styles.headerSubtitle}>
-              Your calls. Transcribed. Organized.
-            </Text>
+        {/* ── Hero Header ── */}
+        <LinearGradient
+          colors={['#EFF6FF', '#F5F3FF', '#F7F9FC']}
+          start={{x: 0, y: 0}}
+          end={{x: 1, y: 1}}
+          style={styles.heroGradient}>
+          <View style={styles.headerRow}>
+            <View style={styles.headerLeft}>
+              <Text style={styles.greeting}>{getGreeting()},</Text>
+              <Text style={styles.userName} numberOfLines={1}>
+                {displayName.split(' ')[0]}
+              </Text>
+              <Text style={styles.headerSubtitle}>
+                Your calls. Transcribed. Organized.
+              </Text>
+            </View>
           </View>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Settings')}
-            accessibilityLabel="Open profile settings"
-            accessibilityRole="button">
-            <Avatar name={displayName} photoUrl={displayPhotoUrl} size={50} />
-          </TouchableOpacity>
-        </View>
-
-        {/* ── Discovery / Phase Status Notice ── */}
-        {hasDiscoveredRecordings ? (
-          <View style={styles.discoveredNotice}>
-            <Text style={styles.discoveredNoticeText}>
-              ✓ Found {totalDiscovered} call recording{totalDiscovered > 1 ? 's' : ''} on device (Phase 3 Scanner)
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.mockNotice}>
-            <Text style={styles.mockNoticeText}>
-              ⚡ Phase 3: Tap "Scan Device" to discover call recordings
-            </Text>
-          </View>
-        )}
+        </LinearGradient>
 
         {/* ── Summary Cards ── */}
         <Text style={styles.sectionTitle}>Today's Summary</Text>
@@ -356,31 +437,31 @@ const HomeScreen: React.FC = () => {
           <StatCard
             label="Total Calls"
             value={stats.totalCalls}
-            subtitle={`+${stats.totalGrowthPercent}%`}
+            subtitle={stats.totalCalls > 0 ? `+${stats.totalGrowthPercent}%` : undefined}
             color={Colors.primary}
             bgColor={Colors.surfaceSecondary}
-            icon="📞"
+            iconName="phone-in-talk"
           />
           <StatCard
             label="Today"
             value={stats.todayCalls}
             color={Colors.secondary}
             bgColor={Colors.surfacePurple}
-            icon="📅"
+            iconName="calendar-today"
           />
           <StatCard
             label="Processed"
             value={stats.processedCalls}
             color={Colors.success}
             bgColor={Colors.successLight}
-            icon="✅"
+            iconName="check-circle-outline"
           />
           <StatCard
             label="Pending"
             value={stats.pendingCalls}
             color={Colors.warning}
             bgColor={Colors.warningLight}
-            icon="⏳"
+            iconName="clock-outline"
           />
         </View>
 
@@ -391,7 +472,7 @@ const HomeScreen: React.FC = () => {
           onPress={handleScan}
         />
 
-        {/* ── Background Processing Status Pill (Phase 12) ── */}
+        {/* ── Background Monitor Status ── */}
         <TouchableOpacity
           style={styles.bgStatusPill}
           onPress={() => navigation.navigate('Settings')}
@@ -408,25 +489,23 @@ const HomeScreen: React.FC = () => {
           />
           <Text style={styles.bgStatusText}>
             {bgSettings.enabled
-              ? `Background Monitor: Active (${bgSettings.intervalMinutes}m • ${
-                  bgSettings.lastSyncStatus === 'running'
-                    ? 'Syncing now...'
-                    : bgSettings.batteryOptimizationsIgnored
-                    ? 'Doze Exempt ✓'
-                    : 'Doze Mode'
+              ? `Background Monitor: Active (${bgSettings.intervalMinutes}m${
+                  bgSettings.batteryOptimizationsIgnored
+                    ? ' • Doze Exempt'
+                    : ''
                 })`
-              : 'Background Monitor: Paused (Tap to configure)'}
+              : 'Background Monitor: Paused'}
           </Text>
-          <Text style={styles.bgStatusArrow}>›</Text>
+          <Icon name="chevron-right" size={16} color={Colors.textTertiary} />
         </TouchableOpacity>
 
-        {/* ── Pipeline Action Banner (Phase 11) ── */}
+        {/* ── Pipeline Automation Card ── */}
         {hasDiscoveredRecordings && (
           <View style={styles.pipelineCard}>
             <View style={styles.pipelineHeader}>
               <View style={styles.pipelineTitleRow}>
-                <Text style={styles.pipelineIcon}>⚡</Text>
-                <Text style={styles.pipelineTitle}>Auto-Pipeline Automation</Text>
+                <Icon name="lightning-bolt" size={18} color={Colors.primary} />
+                <Text style={styles.pipelineTitle}>Auto-Pipeline</Text>
               </View>
               {isProcessingPipeline ? (
                 <View style={styles.pipelineActiveBadge}>
@@ -441,7 +520,8 @@ const HomeScreen: React.FC = () => {
                 </View>
               ) : (
                 <View style={styles.pipelineCompletedBadge}>
-                  <Text style={styles.pipelineCompletedText}>✓ All Synced</Text>
+                  <Icon name="check" size={12} color={Colors.success} />
+                  <Text style={styles.pipelineCompletedText}>All Synced</Text>
                 </View>
               )}
             </View>
@@ -449,7 +529,7 @@ const HomeScreen: React.FC = () => {
             <Text style={styles.pipelineDesc}>
               {isProcessingPipeline
                 ? pipelineProgressText
-                : 'Automated 4-stage pipeline: Device Call Match → Google Drive Backup → Multi-Provider Speech Diarization → Google Sheets Row Insertion.'}
+                : 'Call Match → Drive Backup → AI Transcription → Sheets CRM Sync'}
             </Text>
 
             {!isProcessingPipeline && stats.pendingCalls > 0 && (
@@ -459,8 +539,9 @@ const HomeScreen: React.FC = () => {
                 activeOpacity={0.8}
                 accessibilityLabel="Process all pending calls"
                 accessibilityRole="button">
+                <Icon name="lightning-bolt" size={16} color={Colors.textInverse} />
                 <Text style={styles.runPipelineBtnText}>
-                  ⚡ Process All Pending Calls ({stats.pendingCalls})
+                  Process All ({stats.pendingCalls})
                 </Text>
               </TouchableOpacity>
             )}
@@ -468,40 +549,56 @@ const HomeScreen: React.FC = () => {
         )}
 
         {/* ── Recent Calls ── */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Recent Calls</Text>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Calls')}
-            accessibilityLabel="View all calls"
-            accessibilityRole="button">
-            <Text style={styles.seeAll}>See All →</Text>
-          </TouchableOpacity>
-        </View>
-
-        <Card variant="elevated" padding={0} style={styles.recentCard}>
-          {recentCalls.map((call, index) => (
-            <View key={call.id}>
-              <RecentCallRow
-                call={call}
-                onPress={() => handleCallPress(call.id)}
-              />
-              {index < recentCalls.length - 1 && (
-                <View style={styles.divider} />
-              )}
+        {recentCalls.length > 0 && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Recent Calls</Text>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('Calls')}
+                accessibilityLabel="View all calls"
+                accessibilityRole="button">
+                <Text style={styles.seeAll}>See All</Text>
+              </TouchableOpacity>
             </View>
-          ))}
-        </Card>
+
+            <Card variant="elevated" padding={0} style={styles.recentCard}>
+              {recentCalls.map((call, index) => (
+                <View key={call.id}>
+                  <RecentCallRow
+                    call={call}
+                    onPress={() => handleCallPress(call.id)}
+                  />
+                  {index < recentCalls.length - 1 && (
+                    <View style={styles.divider} />
+                  )}
+                </View>
+              ))}
+            </Card>
+          </>
+        )}
+
+        {/* ── Empty State ── */}
+        {!hasDiscoveredRecordings && !isScanning && (
+          <View style={styles.emptyState}>
+            <Icon name="phone-missed" size={48} color={Colors.textTertiary} />
+            <Text style={styles.emptyStateTitle}>No Recordings Yet</Text>
+            <Text style={styles.emptyStateDesc}>
+              Tap the scan button above to discover call recordings on your device.
+            </Text>
+          </View>
+        )}
 
         {/* ── Failed calls alert ── */}
         {stats.failedCalls > 0 && (
           <View style={styles.failedAlert}>
+            <Icon name="alert-circle" size={16} color={Colors.error} />
             <Text style={styles.failedAlertText}>
-              ⚠️ {stats.failedCalls} recordings failed to process.
+              {stats.failedCalls} recordings failed to process.
             </Text>
             <TouchableOpacity
               onPress={() => navigation.navigate('Calls')}
               accessibilityRole="button">
-              <Text style={styles.failedAlertAction}>View →</Text>
+              <Text style={styles.failedAlertAction}>View</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -519,16 +616,22 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: Spacing.xl,
     paddingBottom: Spacing['4xl'],
   },
 
-  // Header
+  // Hero gradient header
+  heroGradient: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.xl,
+    borderBottomLeftRadius: BorderRadius['2xl'],
+    borderBottomRightRadius: BorderRadius['2xl'],
+    marginBottom: Spacing.md,
+  },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: Spacing.md,
   },
   headerLeft: {
     flex: 1,
@@ -552,41 +655,42 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
 
-  // Mock notice
-  mockNotice: {
-    backgroundColor: Colors.warningLight,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    marginBottom: Spacing.lg,
-    borderWidth: 1,
-    borderColor: Colors.warning,
-  },
-  mockNoticeText: {
-    fontSize: FontSize.xs,
-    color: Colors.warning,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-
-  // Discovered notice
+  // Status notices
   discoveredNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
     backgroundColor: Colors.successLight,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
+    marginHorizontal: Spacing.xl,
     marginBottom: Spacing.lg,
     borderWidth: 1,
-    borderColor: Colors.success,
+    borderColor: Colors.success + '30',
   },
   discoveredNoticeText: {
     fontSize: FontSize.xs,
     color: Colors.success,
     fontWeight: '600',
-    textAlign: 'center',
   },
-  scanContent: {
-    flex: 1,
+  emptyNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.background,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginHorizontal: Spacing.xl,
+    marginBottom: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  emptyNoticeText: {
+    fontSize: FontSize.xs,
+    color: Colors.textTertiary,
+    fontWeight: '600',
   },
 
   // Section titles
@@ -595,6 +699,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textPrimary,
     marginBottom: Spacing.md,
+    paddingHorizontal: Spacing.xl,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -602,6 +707,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing.md,
     marginTop: Spacing.md,
+    paddingHorizontal: Spacing.xl,
   },
   seeAll: {
     fontSize: FontSize.sm,
@@ -615,39 +721,85 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: Spacing.md,
     marginBottom: Spacing.xl,
+    paddingHorizontal: Spacing.xl,
   },
   statCard: {
     width: CARD_WIDTH,
+    backgroundColor: Colors.surface,
     borderRadius: BorderRadius.lg,
-    padding: Spacing.base,
-    ...(Shadow.md as object),
+    padding: Spacing.md,
+    borderWidth: 1,
+    ...(Shadow.sm as object),
+  },
+  statTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.xs,
+  },
+  statIconAndCount: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   statIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: BorderRadius.md,
+    width: 32,
+    height: 32,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: Spacing.sm,
-  },
-  statIcon: {
-    fontSize: 18,
   },
   statValue: {
-    fontSize: FontSize['3xl'],
+    fontSize: FontSize.xl,
     fontWeight: '800',
-    letterSpacing: -1,
-    marginBottom: 2,
+    letterSpacing: -0.5,
+  },
+  statTrendBadge: {
+    backgroundColor: Colors.successLight,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+  },
+  statTrendText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: Colors.success,
+  },
+  statPulseDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statPulseDotInner: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   statLabel: {
     fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    fontWeight: '500',
+    color: Colors.textPrimary,
+    fontWeight: '700',
+    marginBottom: 4,
   },
-  statSubtitle: {
-    fontSize: FontSize.xs,
-    fontWeight: '600',
+  statBottomSection: {
     marginTop: 2,
+  },
+  statTagText: {
+    fontSize: 10,
+    color: Colors.textTertiary,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  statTrackBar: {
+    height: 3,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  statFillBar: {
+    height: '100%',
+    borderRadius: 2,
   },
 
   // Scan button
@@ -658,6 +810,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.xl,
     paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.base,
+    marginHorizontal: Spacing.xl,
     marginBottom: Spacing.xl,
     gap: Spacing.md,
     ...(Shadow.lg as object),
@@ -665,8 +818,16 @@ const styles = StyleSheet.create({
   scanButtonActive: {
     backgroundColor: Colors.primaryDark,
   },
-  scanIcon: {
-    fontSize: 28,
+  scanIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanContent: {
+    flex: 1,
   },
   scanTitle: {
     fontSize: FontSize.base,
@@ -683,6 +844,7 @@ const styles = StyleSheet.create({
   recentCard: {
     overflow: 'hidden',
     marginBottom: Spacing.xl,
+    marginHorizontal: Spacing.xl,
   },
   recentRow: {
     flexDirection: 'row',
@@ -719,10 +881,6 @@ const styles = StyleSheet.create({
     gap: 4,
     marginBottom: 4,
   },
-  callTypeArrow: {
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-  },
   recentDuration: {
     fontSize: FontSize.xs,
     color: Colors.textSecondary,
@@ -734,19 +892,41 @@ const styles = StyleSheet.create({
     marginLeft: Spacing.base + 46 + Spacing.md,
   },
 
+  // Empty state
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: Spacing['3xl'],
+    paddingHorizontal: Spacing.xl,
+  },
+  emptyStateTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginTop: Spacing.base,
+    marginBottom: Spacing.sm,
+  },
+  emptyStateDesc: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+
   // Failed alert
   failedAlert: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: Spacing.sm,
     backgroundColor: Colors.errorLight,
     borderRadius: BorderRadius.lg,
     paddingHorizontal: Spacing.base,
     paddingVertical: Spacing.md,
     borderWidth: 1,
-    borderColor: Colors.error,
+    borderColor: Colors.error + '30',
+    marginHorizontal: Spacing.xl,
   },
   failedAlertText: {
+    flex: 1,
     fontSize: FontSize.sm,
     color: Colors.error,
     fontWeight: '500',
@@ -757,12 +937,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // Pipeline Card Styles (Phase 11)
+  // Pipeline Card
   pipelineCard: {
     backgroundColor: Colors.surface,
     borderRadius: BorderRadius.lg,
     padding: Spacing.base,
-    marginTop: Spacing.md,
+    marginHorizontal: Spacing.xl,
+    marginBottom: Spacing.md,
     borderWidth: 1,
     borderColor: Colors.border,
     ...(Shadow.sm as object),
@@ -778,9 +959,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.xs,
   },
-  pipelineIcon: {
-    fontSize: 16,
-  },
   pipelineTitle: {
     fontSize: FontSize.sm,
     fontWeight: '700',
@@ -790,7 +968,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: Colors.primaryLight,
+    backgroundColor: Colors.primaryLight + '40',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: BorderRadius.full,
@@ -812,6 +990,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   pipelineCompletedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: Colors.successLight,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -829,10 +1010,13 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   runPipelineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
     backgroundColor: Colors.primary,
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.md,
-    alignItems: 'center',
     marginTop: Spacing.md,
     ...(Shadow.sm as object),
   },
@@ -842,7 +1026,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // Background Status Pill (Phase 12)
+  // Background Status Pill
   bgStatusPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -852,6 +1036,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     borderWidth: 1,
     borderColor: Colors.border,
+    marginHorizontal: Spacing.xl,
     marginBottom: Spacing.md,
     ...(Shadow.sm as object),
   },
@@ -872,11 +1057,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.textSecondary,
     fontWeight: '600',
-  },
-  bgStatusArrow: {
-    fontSize: FontSize.base,
-    color: Colors.textTertiary,
-    marginLeft: Spacing.xs,
   },
 });
 

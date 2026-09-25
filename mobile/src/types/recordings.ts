@@ -1,4 +1,4 @@
-// TeleCaller AI — Recording Types (Phase 3)
+// TeleCaller AI — Recording Types
 
 export type DiscoverySource = 'media_store' | 'filesystem' | 'saf';
 

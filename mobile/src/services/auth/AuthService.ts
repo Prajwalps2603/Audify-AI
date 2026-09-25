@@ -1,4 +1,4 @@
-// TeleCaller AI — Auth Service (Phase 2)
+// TeleCaller AI — Auth Service
 // Wraps @react-native-google-signin/google-signin
 // Handles sign-in, sign-out, token refresh, and session persistence.
 //

@@ -1,4 +1,4 @@
-// TeleCaller AI — Audio Player Types (Phase 6)
+// TeleCaller AI — Audio Player Types
 
 export type PlaybackStatusType =
   | 'idle'

@@ -1,4 +1,4 @@
-package com.telecallerai
+package com.audifyai
 
 import android.app.Activity
 import android.content.ContentUris

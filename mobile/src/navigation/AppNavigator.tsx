@@ -1,12 +1,13 @@
-// TeleCaller AI — Navigation Configuration (Phase 2)
-// Auth-aware navigation: checks authentication state and routes accordingly.
+// TeleCaller AI — Navigation Configuration
+// Auth-aware navigation with consent gating and premium icon tab bar.
 
-import React from 'react';
-import {View, Text, StyleSheet, ActivityIndicator} from 'react-native';
+import React, {useState, useEffect} from 'react';
+import {View, Text, Image, StyleSheet, ActivityIndicator, AppState} from 'react-native';
 import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {SafeAreaProvider, useSafeAreaInsets} from 'react-native-safe-area-context';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 import LoginScreen from '../screens/Login/LoginScreen';
 import HomeScreen from '../screens/Home/HomeScreen';
@@ -14,11 +15,20 @@ import CallsScreen from '../screens/Calls/CallsScreen';
 import CallDetailsScreen from '../screens/CallDetails/CallDetailsScreen';
 import TranscriptScreen from '../screens/Transcript/TranscriptScreen';
 import SettingsScreen from '../screens/Settings/SettingsScreen';
+import OnboardingConsentScreen from '../screens/Onboarding/OnboardingConsentScreen';
+import ProfileScreen from '../screens/Profile/ProfileScreen';
+import AdminSettingsScreen from '../screens/Admin/AdminSettingsScreen';
+import ModelTierDetailsScreen from '../screens/Settings/ModelTierDetailsScreen';
 
 import {AuthProvider, useAuth} from '../context/AuthContext';
 import {RecordingProvider} from '../context/RecordingContext';
 import {Colors, FontSize, BorderRadius, Shadow, Spacing} from '../theme';
 import {RootStackParamList, MainTabParamList, CallStackParamList} from '../types';
+
+import {ToastContainer} from '../components/Toast';
+import {AppModalContainer} from '../components/AppModal';
+import {AppLockService} from '../services/security/AppLockService';
+import {AppLockModal} from '../components/AppLockModal';
 
 // ─────────────────────────────────────────────────────────────
 // Navigators
@@ -32,10 +42,11 @@ const CallStack = createNativeStackNavigator<CallStackParamList>();
 // ─────────────────────────────────────────────────────────────
 const InitializingScreen: React.FC = () => (
   <View style={styles.initContainer}>
-    <View style={styles.initLogoMark}>
-      <Text style={styles.initLogoText}>TC</Text>
-    </View>
-    <Text style={styles.initTitle}>TeleCaller AI</Text>
+    <Image
+      source={require('../assets/logo_main.png')}
+      style={styles.initLogoImage}
+      resizeMode="contain"
+    />
     <Text style={styles.initSubtitle}>Record • Transcribe • Organize</Text>
     <ActivityIndicator
       size="small"
@@ -47,16 +58,20 @@ const InitializingScreen: React.FC = () => (
 );
 
 // ─────────────────────────────────────────────────────────────
-// Tab Bar Icon
+// Tab Bar Icon (Vector Icons)
 // ─────────────────────────────────────────────────────────────
 interface TabIconProps {
-  emoji: string;
+  iconName: string;
   focused: boolean;
 }
 
-const TabIcon: React.FC<TabIconProps> = ({emoji, focused}) => (
+const TabIcon: React.FC<TabIconProps> = ({iconName, focused}) => (
   <View style={[styles.tabIconBadge, focused && styles.tabIconBadgeActive]}>
-    <Text style={[styles.tabEmoji, {opacity: focused ? 1 : 0.65}]}>{emoji}</Text>
+    <Icon
+      name={iconName}
+      size={22}
+      color={focused ? Colors.primary : Colors.textTertiary}
+    />
   </View>
 );
 
@@ -100,7 +115,7 @@ const MainTabs: React.FC = () => {
         component={HomeScreen}
         options={{
           tabBarLabel: 'Home',
-          tabBarIcon: ({focused}) => <TabIcon emoji="🏠" focused={focused} />,
+          tabBarIcon: ({focused}) => <TabIcon iconName="home" focused={focused} />,
         }}
       />
       <BottomTab.Screen
@@ -108,7 +123,7 @@ const MainTabs: React.FC = () => {
         component={CallsStack}
         options={{
           tabBarLabel: 'Calls',
-          tabBarIcon: ({focused}) => <TabIcon emoji="📞" focused={focused} />,
+          tabBarIcon: ({focused}) => <TabIcon iconName="phone" focused={focused} />,
         }}
       />
       <BottomTab.Screen
@@ -116,11 +131,19 @@ const MainTabs: React.FC = () => {
         component={SettingsScreen}
         options={{
           tabBarLabel: 'Settings',
-          tabBarIcon: ({focused}) => <TabIcon emoji="⚙️" focused={focused} />,
+          tabBarIcon: ({focused}) => <TabIcon iconName="cog" focused={focused} />,
         }}
       />
     </BottomTab.Navigator>
   );
+};
+
+// ─────────────────────────────────────────────────────────────
+// Consent Screen Wrapper (passes acceptConsent callback)
+// ─────────────────────────────────────────────────────────────
+const ConsentScreenWrapper: React.FC = () => {
+  const {acceptConsent} = useAuth();
+  return <OnboardingConsentScreen onAccept={acceptConsent} />;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -135,15 +158,49 @@ const RootNavigator: React.FC = () => {
   }
 
   const isSignedIn = authState.status === 'SIGNED_IN';
+  const needsConsent =
+    authState.status === 'SIGNED_IN' && authState.needsConsent === true;
+
+  // Determine initial route
+  let initialRouteName: keyof RootStackParamList;
+  if (!isSignedIn) {
+    initialRouteName = 'Login';
+  } else if (needsConsent) {
+    initialRouteName = 'OnboardingConsent';
+  } else {
+    initialRouteName = 'Main';
+  }
 
   return (
     <RootStack.Navigator
       screenOptions={{headerShown: false}}
-      initialRouteName={isSignedIn ? 'Main' : 'Login'}>
-      {isSignedIn ? (
-        <RootStack.Screen name="Main" component={MainTabs} />
-      ) : (
+      initialRouteName={initialRouteName}>
+      {!isSignedIn ? (
         <RootStack.Screen name="Login" component={LoginScreen} />
+      ) : needsConsent ? (
+        <RootStack.Screen
+          name="OnboardingConsent"
+          component={ConsentScreenWrapper}
+        />
+      ) : (
+        <>
+          <RootStack.Screen name="Main" component={MainTabs} />
+          <RootStack.Screen
+            name="Profile"
+            component={ProfileScreen}
+            options={{animation: 'slide_from_right'}}
+          />
+          <RootStack.Screen
+            name="AdminSettings"
+            component={AdminSettingsScreen}
+            options={{animation: 'slide_from_right'}}
+          />
+          <RootStack.Screen
+            name="ModelTierDetails"
+            component={ModelTierDetailsScreen}
+            options={{animation: 'slide_from_right'}}
+          />
+        </>
       )}
     </RootStack.Navigator>
   );
@@ -152,17 +209,47 @@ const RootNavigator: React.FC = () => {
 // ─────────────────────────────────────────────────────────────
 // App Navigator (root)
 // ─────────────────────────────────────────────────────────────
-const AppNavigator: React.FC = () => (
-  <SafeAreaProvider>
-    <AuthProvider>
-      <RecordingProvider>
-        <NavigationContainer>
-          <RootNavigator />
-        </NavigationContainer>
-      </RecordingProvider>
-    </AuthProvider>
-  </SafeAreaProvider>
-);
+const AppNavigator: React.FC = () => {
+  const [isAppLocked, setIsAppLocked] = useState(AppLockService.getIsLocked());
+
+  useEffect(() => {
+    const unsub = AppLockService.subscribe(locked => {
+      setIsAppLocked(locked);
+    });
+
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      if (nextAppState === 'background') {
+        if (AppLockService.isLockEnabled()) {
+          AppLockService.lock();
+        }
+      }
+    });
+
+    return () => {
+      unsub();
+      subscription.remove();
+    };
+  }, []);
+
+  return (
+    <SafeAreaProvider>
+      <AuthProvider>
+        <RecordingProvider>
+          <NavigationContainer>
+            <RootNavigator />
+          </NavigationContainer>
+          <ToastContainer />
+          <AppModalContainer />
+          <AppLockModal
+            visible={isAppLocked}
+            mode="unlock"
+            onSuccess={() => setIsAppLocked(false)}
+          />
+        </RecordingProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
+  );
+};
 
 // ─────────────────────────────────────────────────────────────
 // Styles
@@ -176,28 +263,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: Spacing.xl,
   },
-  initLogoMark: {
-    width: 64,
-    height: 64,
-    borderRadius: 18,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.lg,
-    ...(Shadow.lg as object),
-  },
-  initLogoText: {
-    color: Colors.textInverse,
-    fontSize: FontSize.xl,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  initTitle: {
-    fontSize: FontSize['2xl'],
-    fontWeight: '800',
-    color: Colors.textPrimary,
-    letterSpacing: -0.5,
-    marginBottom: Spacing.xs,
+  initLogoImage: {
+    width: 220,
+    height: 70,
+    marginBottom: Spacing.md,
   },
   initSubtitle: {
     fontSize: FontSize.sm,
@@ -239,9 +308,6 @@ const styles = StyleSheet.create({
   },
   tabIconBadgeActive: {
     backgroundColor: Colors.surfaceSecondary,
-  },
-  tabEmoji: {
-    fontSize: 20,
   },
   tabLabel: {
     fontSize: FontSize.xs,

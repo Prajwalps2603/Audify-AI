@@ -1,4 +1,4 @@
-// TeleCaller AI — Server Google Sheets Service (Phase 8)
+// Audify AI — Server Google Sheets Service (Phase 8)
 // Backend service for handling Google Sheets creation, duplicate verification,
 // header formatting, and automated row insertion.
 
@@ -28,7 +28,7 @@ export interface ServerSheetSyncResult {
 }
 
 export const SERVER_SHEETS_CONFIG = {
-  SPREADSHEET_TITLE: 'TeleCaller AI - Call Records',
+  SPREADSHEET_TITLE: 'Audify AI - Call Records',
   SHEET_NAME: 'Call Records',
   HEADERS: [
     'Call ID',           // Col A
@@ -53,7 +53,7 @@ export class ServerGoogleSheetsService {
   private static DRIVE_API = 'https://www.googleapis.com/drive/v3';
 
   /**
-   * Search or create the "TeleCaller AI - Call Records" spreadsheet in Google Drive.
+   * Search or create the "Audify AI - Call Records" spreadsheet in Google Drive.
    */
   static async getOrCreateSpreadsheet(
     accessToken: string,

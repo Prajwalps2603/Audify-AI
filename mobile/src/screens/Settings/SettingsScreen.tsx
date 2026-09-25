@@ -1,20 +1,27 @@
+// TeleCaller AI — Settings Screen
+// Premium settings with vector icons, custom modals, and professional UI.
+
 import React, {useState, useEffect} from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
   Switch,
   StatusBar,
-  Alert,
   Linking,
+  Modal,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
+import LinearGradient from 'react-native-linear-gradient';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {Colors, FontSize, BorderRadius, Shadow, Spacing} from '../../theme';
 import Avatar from '../../components/Avatar';
 import Card from '../../components/Card';
+import BrandHeader from '../../components/BrandHeader';
 import {useAuth} from '../../context/AuthContext';
 import {useRecordings} from '../../context/RecordingContext';
 import {GoogleDriveService} from '../../services/drive/GoogleDriveService';
@@ -26,19 +33,35 @@ import {BackgroundProcessingService} from '../../services/background/BackgroundP
 import {BackgroundSettings} from '../../types/background';
 import {PrivacyConsentModal} from './PrivacyConsentModal';
 import {SecurityAuditModal} from './SecurityAuditModal';
+import {AppLockService} from '../../services/security/AppLockService';
+import {AppLockModal} from '../../components/AppLockModal';
+import {toast} from '../../components/Toast';
+import {showModal, showConfirm, showDestructiveConfirm, showAlert, showSelection} from '../../components/AppModal';
+import {
+  AdminConfigService,
+  AdminFeatureConfig,
+} from '../../services/admin/AdminConfigService';
+import {
+  ApiModelService,
+  AIModelConfig,
+} from '../../services/admin/ApiModelService';
 
 // ─────────────────────────────────────────────────────────────
 // Section Header
 // ─────────────────────────────────────────────────────────────
-const SectionHeader: React.FC<{title: string}> = ({title}) => (
-  <Text style={styles.sectionHeader}>{title}</Text>
+const SectionHeader: React.FC<{title: string; iconName: string}> = ({title, iconName}) => (
+  <View style={styles.sectionHeaderRow}>
+    <Icon name={iconName} size={14} color={Colors.textTertiary} />
+    <Text style={styles.sectionHeader}>{title}</Text>
+  </View>
 );
 
 // ─────────────────────────────────────────────────────────────
 // Settings Row
 // ─────────────────────────────────────────────────────────────
 interface SettingRowProps {
-  icon: string;
+  iconName: string;
+  iconColor?: string;
   label: string;
   value?: string;
   type?: 'navigate' | 'toggle' | 'info';
@@ -52,8 +75,33 @@ interface SettingRowProps {
   isLast?: boolean;
 }
 
+function getSettingBadgeTheme(badgeText: string) {
+  const t = badgeText.trim().toLowerCase();
+  if (t === 'connected' || t === 'exempted' || t === 'verified' || t === 'active') {
+    return {
+      bg: '#DCFCE7',
+      border: '#86EFAC',
+      text: '#15803D',
+    };
+  }
+  if (t.includes('not') || t.includes('tap') || t.includes('exempt')) {
+    return {
+      bg: '#FEF3C7',
+      border: '#FDE68A',
+      text: '#92400E',
+    };
+  }
+  // Speech-to-text model name / provider e.g. GOOGLE, OPENAI, DEEPGRAM
+  return {
+    bg: '#EEF2FF',
+    border: '#C7D2FE',
+    text: '#312E81',
+  };
+}
+
 const SettingRow: React.FC<SettingRowProps> = ({
-  icon,
+  iconName,
+  iconColor,
   label,
   value,
   type = 'navigate',
@@ -84,8 +132,13 @@ const SettingRow: React.FC<SettingRowProps> = ({
         style={[
           styles.settingIcon,
           isDestructive && styles.settingIconDestructive,
+          iconColor ? {backgroundColor: iconColor + '15'} : null,
         ]}>
-        <Text style={styles.settingIconText}>{icon}</Text>
+        <Icon
+          name={iconName}
+          size={18}
+          color={isDestructive ? Colors.error : (iconColor || Colors.primary)}
+        />
       </View>
 
       {/* Label */}
@@ -115,15 +168,26 @@ const SettingRow: React.FC<SettingRowProps> = ({
         />
       )}
       {type === 'navigate' && (
-        <Text style={styles.chevron}>›</Text>
+        <Icon name="chevron-right" size={20} color={Colors.textTertiary} />
       )}
-      {badge && (
-        <View style={[styles.badge, {backgroundColor: badgeColor ?? Colors.successLight}]}>
-          <Text style={[styles.badgeText, {color: badgeColor ? Colors.textInverse : Colors.success}]}>
-            {badge}
-          </Text>
-        </View>
-      )}
+      {badge && (() => {
+        const theme = getSettingBadgeTheme(badge);
+        return (
+          <View
+            style={[
+              styles.badge,
+              {
+                backgroundColor: theme.bg,
+                borderColor: theme.border,
+                borderWidth: 1,
+              },
+            ]}>
+            <Text style={[styles.badgeText, {color: theme.text}]}>
+              {badge}
+            </Text>
+          </View>
+        );
+      })()}
     </TouchableOpacity>
   );
 };
@@ -157,6 +221,49 @@ const SettingsScreen: React.FC = () => {
   const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
   const [securityModalVisible, setSecurityModalVisible] = useState(false);
 
+  const [modelPickerVisible, setModelPickerVisible] = useState(false);
+  const [availableModels, setAvailableModels] = useState<AIModelConfig[]>(
+    ApiModelService.getModels(displayEmail),
+  );
+  const [selectedModelId, setSelectedModelId] = useState<string>(
+    ApiModelService.getSelectedModelId(),
+  );
+
+  const isSuperAdmin = AdminConfigService.isAdmin(displayEmail);
+  const [adminConfig, setAdminConfig] = useState<AdminFeatureConfig>(
+    AdminConfigService.getConfig(),
+  );
+
+  const [isAppLockEnabled, setIsAppLockEnabled] = useState(AppLockService.isLockEnabled());
+  const [showAppLockSetup, setShowAppLockSetup] = useState(false);
+
+  useEffect(() => {
+    const unsubAppLock = AppLockService.subscribe(() => {
+      setIsAppLockEnabled(AppLockService.isLockEnabled());
+    });
+    return () => unsubAppLock();
+  }, []);
+
+  useEffect(() => {
+    AdminConfigService.setUserEmail(displayEmail);
+    ApiModelService.setUserEmail(displayEmail);
+    AdminConfigService.syncFromBackend(displayEmail);
+    ApiModelService.syncFromBackend(displayEmail);
+
+    const unsubAdmin = AdminConfigService.subscribe(setAdminConfig);
+    const unsubModels = ApiModelService.subscribe(models => {
+      setAvailableModels(models);
+    });
+    return () => {
+      unsubAdmin();
+      unsubModels();
+    };
+  }, [displayEmail]);
+
+  const showSetting = (key: keyof AdminFeatureConfig) => {
+    return isSuperAdmin || Boolean(adminConfig[key]);
+  };
+
   useEffect(() => {
     const unsub = BackgroundProcessingService.subscribe(setBgSettings);
     TranscriptionService.getSelectedProvider().then(setSelectedProvider);
@@ -171,57 +278,51 @@ const SettingsScreen: React.FC = () => {
   }, [authState.status]);
 
   const handleSelectInterval = () => {
-    Alert.alert(
-      'Background Check Frequency',
-      'Select how often TeleCaller AI inspects storage for new call recordings in the background:',
+    showSelection(
+      'Scan Frequency',
+      'Select how often Audify AI checks for new call recordings:',
       [
         {
-          text: `Every 5 Minutes ${bgSettings.intervalMinutes === 5 ? '✓' : ''}`,
-          onPress: () =>
-            BackgroundProcessingService.updateSettings({intervalMinutes: 5}),
+          text: 'Every 5 Minutes',
+          selected: bgSettings.intervalMinutes === 5,
+          onPress: () => BackgroundProcessingService.updateSettings({intervalMinutes: 5}),
         },
         {
-          text: `Every 15 Minutes ${bgSettings.intervalMinutes === 15 ? '✓' : ''}`,
-          onPress: () =>
-            BackgroundProcessingService.updateSettings({intervalMinutes: 15}),
+          text: 'Every 15 Minutes',
+          selected: bgSettings.intervalMinutes === 15,
+          onPress: () => BackgroundProcessingService.updateSettings({intervalMinutes: 15}),
         },
         {
-          text: `Every 30 Minutes ${bgSettings.intervalMinutes === 30 ? '✓' : ''}`,
-          onPress: () =>
-            BackgroundProcessingService.updateSettings({intervalMinutes: 30}),
+          text: 'Every 30 Minutes',
+          selected: bgSettings.intervalMinutes === 30,
+          onPress: () => BackgroundProcessingService.updateSettings({intervalMinutes: 30}),
         },
         {
-          text: `Every 60 Minutes ${bgSettings.intervalMinutes === 60 ? '✓' : ''}`,
-          onPress: () =>
-            BackgroundProcessingService.updateSettings({intervalMinutes: 60}),
+          text: 'Every 60 Minutes',
+          selected: bgSettings.intervalMinutes === 60,
+          onPress: () => BackgroundProcessingService.updateSettings({intervalMinutes: 60}),
         },
-        {text: 'Cancel', style: 'cancel'},
       ],
     );
   };
 
   const handleBatteryOptimization = async () => {
     if (bgSettings.batteryOptimizationsIgnored) {
-      Alert.alert(
+      showAlert(
         'Battery Optimization',
-        'TeleCaller AI is already exempted from Android battery optimizations. Background tasks can run reliably without being killed by Doze mode.',
-        [{text: 'OK'}],
+        'Audify AI is already exempted from battery optimizations. Background tasks run reliably.',
       );
       return;
     }
 
-    Alert.alert(
+    showConfirm(
       'Exempt from Battery Saver',
-      'Android OEM task killers (MIUI, OneUI, ColorOS) terminate background monitors when screen is locked.\n\nWould you like to exempt TeleCaller AI from battery optimization to ensure recordings are immediately processed?',
-      [
-        {text: 'Later', style: 'cancel'},
-        {
-          text: 'Allow Exemption',
-          onPress: async () => {
-            await BackgroundProcessingService.requestIgnoreBatteryOptimizations();
-          },
-        },
-      ],
+      'Android task killers may terminate background monitors. Exempt Audify AI to ensure recordings are processed immediately.',
+      async () => {
+        await BackgroundProcessingService.requestIgnoreBatteryOptimizations();
+        toast.success('Exemption Granted', 'Battery optimization exemption applied.');
+      },
+      'Allow Exemption',
     );
   };
 
@@ -230,16 +331,12 @@ const SettingsScreen: React.FC = () => {
     try {
       const res =
         await BackgroundProcessingService.checkAndProcessNewRecordings(true);
-      Alert.alert(
-        'Background Sync',
-        `Sync executed successfully!\n\n• Discovered: ${res.discovered}\n• Processed: ${res.processed}\n• Failed: ${res.failed}`,
-        [{text: 'OK'}],
+      toast.success(
+        'Sync Complete',
+        `Discovered: ${res.discovered} • Processed: ${res.processed} • Failed: ${res.failed}`,
       );
     } catch (e: any) {
-      Alert.alert(
-        'Sync Error',
-        e?.message || 'Failed to complete background sync.',
-      );
+      toast.error('Sync Error', e?.message || 'Failed to complete background sync.');
     } finally {
       setIsTriggeringSync(false);
     }
@@ -247,136 +344,110 @@ const SettingsScreen: React.FC = () => {
 
   const handleDriveDetails = async () => {
     if (driveStatus !== 'connected') {
-      Alert.alert(
+      showAlert(
         'Google Drive',
         'Google Drive is not connected. Please ensure you are signed in with a Google account that has Drive permissions enabled.',
-        [{text: 'OK'}],
       );
       return;
     }
 
-    Alert.alert(
+    showConfirm(
       'Google Drive Connected',
-      `Account: ${displayEmail}\n\nFolder Hierarchy:\n• TeleCaller AI/\n  • Recordings/\n    • YYYY/MM/DD/\n  • Call Records/\n\nDuplicate Protection: Active\n\nWould you like to verify and ensure the Drive folder structure now?`,
-      [
-        {text: 'Cancel', style: 'cancel'},
-        {
-          text: 'Verify Folders',
-          onPress: async () => {
-            try {
-              const res = await GoogleDriveService.ensureFolderHierarchy();
-              Alert.alert(
-                'Folders Ready',
-                `Google Drive folder structure verified successfully!\n\nRoot ID: ${res.rootFolderId}\nRecordings: ${res.recordingsFolderId}`,
-                [{text: 'OK'}],
-              );
-            } catch (e: any) {
-              Alert.alert(
-                'Folder Verification Failed',
-                e?.message || 'Could not verify folders.',
-              );
-            }
-          },
-        },
-      ],
+      `Account: ${displayEmail}\n\nFolder Hierarchy:\n• Audify AI/\n  • Recordings/\n    • YYYY/MM/DD/\n\nDuplicate Protection: Active`,
+      async () => {
+        try {
+          const res = await GoogleDriveService.ensureFolderHierarchy();
+          toast.success(
+            'Folders Verified',
+            `Root: ${res.rootFolderId}\nRecordings: ${res.recordingsFolderId}`,
+          );
+        } catch (e: any) {
+          toast.error('Verification Failed', e?.message || 'Could not verify folders.');
+        }
+      },
+      'Verify Folders',
     );
   };
 
   const handleSheetsDetails = async () => {
     if (sheetsStatus !== 'connected') {
-      Alert.alert(
+      showAlert(
         'Google Sheets',
         'Google Sheets is not connected. Please ensure you are signed in with a Google account that has Sheets permissions enabled.',
-        [{text: 'OK'}],
       );
       return;
     }
 
-    Alert.alert(
+    showConfirm(
       'Google Sheets Connected',
-      `Account: ${displayEmail}\n\nSpreadsheet: TeleCaller AI - Call Records\nSheet: Call Records\nColumns: A (Call ID) to N (Processed At)\n\n• Automatic row insertion upon recording processing\n• Duplicate check active\n• Strictly no manual sync button`,
-      [
-        {text: 'Cancel', style: 'cancel'},
-        {
-          text: 'Verify / Open Sheet',
-          onPress: async () => {
-            try {
-              const sheetInfo = await GoogleSheetsService.getOrCreateSpreadsheet();
-              Alert.alert(
-                'Sheet Ready',
-                `Spreadsheet verified and ready!\n\nTitle: ${sheetInfo.title}\nID: ${sheetInfo.spreadsheetId}\n\nWould you like to open it now?`,
-                [
-                  {text: 'Done', style: 'cancel'},
-                  {
-                    text: 'Open Sheet ↗',
-                    onPress: () => {
-                      if (sheetInfo.spreadsheetUrl) {
-                        Linking.openURL(sheetInfo.spreadsheetUrl);
-                      }
-                    },
-                  },
-                ],
-              );
-            } catch (e: any) {
-              Alert.alert(
-                'Sheet Verification Failed',
-                e?.message || 'Could not verify sheet.',
-              );
-            }
-          },
-        },
-      ],
+      `Account: ${displayEmail}\n\nSpreadsheet: Audify AI - Call Records\nColumns: A (Call ID) to N (Processed At)\n\nAutomatic row insertion active.`,
+      async () => {
+        try {
+          const sheetInfo = await GoogleSheetsService.getOrCreateSpreadsheet();
+          showConfirm(
+            'Sheet Ready',
+            `Spreadsheet verified!\n\nTitle: ${sheetInfo.title}\nID: ${sheetInfo.spreadsheetId}`,
+            () => {
+              if (sheetInfo.spreadsheetUrl) {
+                Linking.openURL(sheetInfo.spreadsheetUrl);
+              }
+            },
+            'Open Sheet',
+          );
+        } catch (e: any) {
+          toast.error('Verification Failed', e?.message || 'Could not verify sheet.');
+        }
+      },
+      'Verify Sheet',
     );
   };
 
   const handleSelectProvider = () => {
-    Alert.alert(
-      'Speech-to-Text Provider',
-      'Select your AI transcription provider for call recordings:\n\n• Google Cloud: v2 Chirp Indian regional languages\n• OpenAI: Whisper-1 robust multilingual\n• Deepgram: Nova-2 conversational telephony diarization',
-      [
-        {
-          text: `Google Cloud STT ${selectedProvider === 'GOOGLE' ? '✓' : ''}`,
-          onPress: async () => {
-            await TranscriptionService.setSelectedProvider('GOOGLE');
-            setSelectedProvider('GOOGLE');
-          },
-        },
-        {
-          text: `OpenAI Whisper ${selectedProvider === 'OPENAI' ? '✓' : ''}`,
-          onPress: async () => {
-            await TranscriptionService.setSelectedProvider('OPENAI');
-            setSelectedProvider('OPENAI');
-          },
-        },
-        {
-          text: `Deepgram Nova-2 ${selectedProvider === 'DEEPGRAM' ? '✓' : ''}`,
-          onPress: async () => {
-            await TranscriptionService.setSelectedProvider('DEEPGRAM');
-            setSelectedProvider('DEEPGRAM');
-          },
-        },
-        {text: 'Cancel', style: 'cancel'},
-      ],
-    );
+    setModelPickerVisible(true);
   };
 
   const handleSignOut = () => {
-    Alert.alert(
+    showDestructiveConfirm(
       'Sign Out',
-      'Sign out from TeleCaller AI?',
-      [
-        {text: 'Cancel', style: 'cancel'},
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: async () => {
-            await signOut();
-            // AuthContext will update authState to SIGNED_OUT
-            // AppNavigator automatically shows Login screen
-          },
-        },
-      ],
+      'Are you sure you want to sign out from Audify AI?',
+      async () => {
+        await signOut();
+      },
+      'Sign Out',
     );
+  };
+
+  const handleDeleteAccount = () => {
+    showDestructiveConfirm(
+      'Delete Account & Data',
+      'This will revoke authorization, permanently delete your local session tokens from Android KeyStore, and reset local app preferences. Are you sure you want to proceed?',
+      async () => {
+        try {
+          await signOut();
+          toast.success('Account Data Deleted', 'Session and credentials wiped successfully.');
+        } catch (e: any) {
+          toast.error('Error', e?.message || 'Failed to delete account data.');
+        }
+      },
+      'Delete Account',
+    );
+  };
+
+  const handleToggleAppLock = (enable: boolean) => {
+    if (enable) {
+      setShowAppLockSetup(true);
+    } else {
+      showDestructiveConfirm(
+        'Disable App Lock',
+        'Are you sure you want to remove PIN lock protection from Audify AI?',
+        async () => {
+          await AppLockService.disable();
+          setIsAppLockEnabled(false);
+          toast.info('App Lock Disabled', 'PIN protection turned off.');
+        },
+        'Disable Lock',
+      );
+    }
   };
 
   const {
@@ -391,31 +462,22 @@ const SettingsScreen: React.FC = () => {
   const handleScanRecordings = async () => {
     try {
       await scanRecordings();
-      Alert.alert(
-        'Recording Scanner',
-        `Scan complete. Discovered ${recordings.length} recording(s) across MediaStore and OEM folders.`,
-        [{text: 'OK'}],
+      toast.success(
+        'Scan Complete',
+        `Discovered ${recordings.length} recording(s) on device.`,
       );
     } catch (e: any) {
-      Alert.alert('Scanner', e?.message || 'Failed to scan recordings.', [{text: 'OK'}]);
+      toast.error('Scan Failed', e?.message || 'Failed to scan recordings.');
     }
   };
 
   const handleSelectFolder = async () => {
     try {
       const folder = await selectFolder();
-      Alert.alert(
-        'Folder Configured',
-        `Access granted and persisted for "${folder.name}".`,
-        [{text: 'OK'}],
-      );
+      toast.success('Folder Configured', `Access granted for "${folder.name}".`);
     } catch (e: any) {
       if (e?.message?.toLowerCase().includes('cancel')) return;
-      Alert.alert(
-        'Folder Picker',
-        e?.message || 'Failed to select recording folder.',
-        [{text: 'OK'}],
-      );
+      toast.error('Folder Error', e?.message || 'Failed to select recording folder.');
     }
   };
 
@@ -424,7 +486,7 @@ const SettingsScreen: React.FC = () => {
       handleSelectFolder();
       return;
     }
-    Alert.alert(
+    showModal(
       'Recording Folder',
       `Current folder: "${selectedFolder.name}"`,
       [
@@ -434,19 +496,12 @@ const SettingsScreen: React.FC = () => {
           style: 'destructive',
           onPress: async () => {
             await clearSelectedFolder();
-            Alert.alert('Folder Removed', 'Persisted folder access cleared.');
+            toast.info('Folder Removed', 'Persisted folder access cleared.');
           },
         },
         {text: 'Close', style: 'cancel'},
       ],
-    );
-  };
-
-  const handleComingSoon = (feature: string) => {
-    Alert.alert(
-      'Coming Soon',
-      `"${feature}" will be implemented in a later phase.`,
-      [{text: 'OK'}],
+      'info',
     );
   };
 
@@ -454,301 +509,497 @@ const SettingsScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" />
 
-      {/* ── Header ── */}
-      <View style={styles.header}>
+      {/* ── Brand Header ── */}
+      <BrandHeader />
+
+      {/* ── Gradient Header ── */}
+      <LinearGradient
+        colors={['#EFF6FF', '#F5F3FF']}
+        start={{x: 0, y: 0}}
+        end={{x: 1, y: 1}}
+        style={styles.header}>
         <Text style={styles.headerTitle}>Settings</Text>
-      </View>
+      </LinearGradient>
 
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}>
 
-        {/* Phase 2 — no more mock notice, auth is real */}
-
         {/* ── ACCOUNT ── */}
-        <SectionHeader title="ACCOUNT" />
+        <SectionHeader title="ACCOUNT" iconName="account-circle-outline" />
         <Card variant="elevated" padding={0} style={styles.settingsGroup}>
-          {/* Profile card — real user */}
+          {/* Profile card */}
           <View style={styles.profileRow}>
             <Avatar name={displayName} photoUrl={displayPhoto} size={52} />
             <View style={styles.profileInfo}>
               <Text style={styles.profileName}>{displayName}</Text>
               <Text style={styles.profileEmail}>{displayEmail}</Text>
               <View style={styles.googleBadge}>
-                <Text style={styles.googleBadgeText}>✓ Google Account</Text>
+                <Icon name="check-circle" size={12} color={Colors.success} />
+                <Text style={styles.googleBadgeText}>Google Account</Text>
               </View>
             </View>
           </View>
           <View style={styles.settingDivider} />
           <SettingRow
-            icon="👤"
+            iconName="account-outline"
+            iconColor={Colors.primary}
             label="Profile"
-            value="View profile"
-            onPress={() => handleComingSoon('Profile')}
+            value="View & edit profile"
+            onPress={() => navigation.navigate('Profile')}
             isFirst={false}
-            isLast={false}
+            isLast={!isSuperAdmin}
           />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="🚪"
-            label="Sign Out"
-            type="navigate"
-            onPress={handleSignOut}
-            isDestructive={true}
-            isLast={true}
-          />
+          {isSuperAdmin && (
+            <>
+              <View style={styles.settingDivider} />
+              <SettingRow
+                iconName="shield-crown-outline"
+                iconColor="#D97706"
+                label="Admin Controls"
+                value="Manage feature visibility"
+                badge="ADMIN"
+                badgeColor="#FEF3C7"
+                onPress={() => navigation.navigate('AdminSettings')}
+                isLast={true}
+              />
+            </>
+          )}
         </Card>
 
         {/* ── RECORDINGS ── */}
-        <SectionHeader title="RECORDINGS" />
-        <Card variant="elevated" padding={0} style={styles.settingsGroup}>
-          <SettingRow
-            icon="📁"
-            label="Recording Folder"
-            value={selectedFolder ? selectedFolder.name : 'Not configured'}
-            onPress={handleFolderDetails}
-            isFirst={true}
-          />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="🔄"
-            label="Change Recording Folder"
-            onPress={handleSelectFolder}
-          />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="🔍"
-            label="Scan Recordings"
-            value={
-              scanStatus === 'scanning'
-                ? 'Scanning...'
-                : recordings.length > 0
-                ? `${recordings.length} found`
-                : 'Tap to scan'
-            }
-            onPress={handleScanRecordings}
-            isLast={true}
-          />
-        </Card>
+        {(showSetting('recordingFolder') ||
+          showSetting('changeRecordingFolder') ||
+          showSetting('scanRecordings')) && (
+          <>
+            <SectionHeader title="RECORDINGS" iconName="folder-music-outline" />
+            <Card variant="elevated" padding={0} style={styles.settingsGroup}>
+              {[
+                showSetting('recordingFolder') && (
+                  <SettingRow
+                    key="rf"
+                    iconName="folder-outline"
+                    iconColor="#F59E0B"
+                    label="Recording Folder"
+                    value={selectedFolder ? selectedFolder.name : 'Not configured'}
+                    onPress={handleFolderDetails}
+                  />
+                ),
+                showSetting('changeRecordingFolder') && (
+                  <SettingRow
+                    key="crf"
+                    iconName="folder-swap-outline"
+                    iconColor="#F59E0B"
+                    label="Change Recording Folder"
+                    onPress={handleSelectFolder}
+                  />
+                ),
+                showSetting('scanRecordings') && (
+                  <SettingRow
+                    key="sr"
+                    iconName="magnify"
+                    iconColor="#2563EB"
+                    label="Scan Recordings"
+                    value={
+                      scanStatus === 'scanning'
+                        ? 'Scanning...'
+                        : recordings.length > 0
+                        ? `${recordings.length} found`
+                        : 'Tap to scan'
+                    }
+                    onPress={handleScanRecordings}
+                  />
+                ),
+              ]
+                .filter(Boolean)
+                .map((item, idx) => (
+                  <React.Fragment key={idx}>
+                    {idx > 0 && <View style={styles.settingDivider} />}
+                    {item}
+                  </React.Fragment>
+                ))}
+            </Card>
+          </>
+        )}
 
-        {/* ── BACKGROUND & AUTOMATION (Phase 12) ── */}
-        <SectionHeader title="BACKGROUND & AUTOMATION" />
-        <Card variant="elevated" padding={0} style={styles.settingsGroup}>
-          <SettingRow
-            icon="🤖"
-            label="Background Monitoring"
-            type="toggle"
-            toggleValue={bgSettings.enabled}
-            onToggle={val =>
-              BackgroundProcessingService.updateSettings({enabled: val})
-            }
-            isFirst={true}
-          />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="🔔"
-            label="Persistent Notification"
-            type="toggle"
-            toggleValue={bgSettings.foregroundServiceEnabled}
-            onToggle={val =>
-              BackgroundProcessingService.updateSettings({
-                foregroundServiceEnabled: val,
-              })
-            }
-          />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="⏱️"
-            label="Scan Frequency"
-            value={`Every ${bgSettings.intervalMinutes} min`}
-            type="navigate"
-            onPress={handleSelectInterval}
-          />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="⚙️"
-            label="Auto-Process Pipeline"
-            type="toggle"
-            toggleValue={bgSettings.autoProcess}
-            onToggle={val =>
-              BackgroundProcessingService.updateSettings({autoProcess: val})
-            }
-          />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="☁️"
-            label="Auto Google Drive Upload"
-            type="toggle"
-            toggleValue={bgSettings.autoUpload}
-            onToggle={val =>
-              BackgroundProcessingService.updateSettings({autoUpload: val})
-            }
-          />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="📝"
-            label="Auto AI Transcription"
-            type="toggle"
-            toggleValue={bgSettings.autoTranscribe}
-            onToggle={val =>
-              BackgroundProcessingService.updateSettings({autoTranscribe: val})
-            }
-          />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="📶"
-            label="Wi-Fi Only Sync"
-            type="toggle"
-            toggleValue={bgSettings.wifiOnly}
-            onToggle={val =>
-              BackgroundProcessingService.updateSettings({wifiOnly: val})
-            }
-          />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="🔋"
-            label="Battery Optimization"
-            badge={
-              bgSettings.batteryOptimizationsIgnored
-                ? 'Exempted ✓'
-                : 'Tap to Exempt'
-            }
-            badgeColor={
-              bgSettings.batteryOptimizationsIgnored
-                ? Colors.successLight
-                : Colors.warningLight
-            }
-            onPress={handleBatteryOptimization}
-          />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="🔄"
-            label="Trigger Background Scan"
-            value={
-              isTriggeringSync || bgSettings.lastSyncStatus === 'running'
-                ? 'Scanning...'
-                : 'Run Now'
-            }
-            onPress={handleTriggerManualBackgroundSync}
-          />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="🕒"
-            label="Last Background Check"
-            value={formatLastSync(
-              bgSettings.lastSyncTimestamp,
-              bgSettings.lastSyncStatus,
-              bgSettings.lastSyncResult,
-            )}
-            type="info"
-            isLast={true}
-          />
-        </Card>
+        {/* ── BACKGROUND & AUTOMATION ── */}
+        {(showSetting('backgroundMonitoring') ||
+          showSetting('persistentNotification') ||
+          showSetting('scanFrequency') ||
+          showSetting('autoProcessPipeline') ||
+          showSetting('autoDriveUpload') ||
+          showSetting('autoTranscription') ||
+          showSetting('wifiOnlySync') ||
+          showSetting('batteryOptimization') ||
+          showSetting('triggerBackgroundScan') ||
+          showSetting('lastBackgroundCheck')) && (
+          <>
+            <SectionHeader title="AUTOMATION" iconName="robot-outline" />
+            <Card variant="elevated" padding={0} style={styles.settingsGroup}>
+              {[
+                showSetting('backgroundMonitoring') && (
+                  <SettingRow
+                    key="bm"
+                    iconName="robot-outline"
+                    iconColor="#7C3AED"
+                    label="Background Monitoring"
+                    type="toggle"
+                    toggleValue={bgSettings.enabled}
+                    onToggle={val =>
+                      BackgroundProcessingService.updateSettings({enabled: val})
+                    }
+                  />
+                ),
+                showSetting('persistentNotification') && (
+                  <SettingRow
+                    key="pn"
+                    iconName="bell-outline"
+                    iconColor="#7C3AED"
+                    label="Persistent Notification"
+                    type="toggle"
+                    toggleValue={bgSettings.foregroundServiceEnabled}
+                    onToggle={val =>
+                      BackgroundProcessingService.updateSettings({
+                        foregroundServiceEnabled: val,
+                      })
+                    }
+                  />
+                ),
+                showSetting('scanFrequency') && (
+                  <SettingRow
+                    key="sf"
+                    iconName="timer-outline"
+                    iconColor="#7C3AED"
+                    label="Scan Frequency"
+                    value={`Every ${bgSettings.intervalMinutes} min`}
+                    type="navigate"
+                    onPress={handleSelectInterval}
+                  />
+                ),
+                showSetting('autoProcessPipeline') && (
+                  <SettingRow
+                    key="app"
+                    iconName="cog-outline"
+                    iconColor="#7C3AED"
+                    label="Auto-Process Pipeline"
+                    type="toggle"
+                    toggleValue={bgSettings.autoProcess}
+                    onToggle={val =>
+                      BackgroundProcessingService.updateSettings({autoProcess: val})
+                    }
+                  />
+                ),
+                showSetting('autoDriveUpload') && (
+                  <SettingRow
+                    key="adu"
+                    iconName="cloud-upload-outline"
+                    iconColor="#2563EB"
+                    label="Auto Google Drive Upload"
+                    type="toggle"
+                    toggleValue={bgSettings.autoUpload}
+                    onToggle={val =>
+                      BackgroundProcessingService.updateSettings({autoUpload: val})
+                    }
+                  />
+                ),
+                showSetting('autoTranscription') && (
+                  <SettingRow
+                    key="at"
+                    iconName="file-document-edit-outline"
+                    iconColor="#2563EB"
+                    label="Auto AI Transcription"
+                    type="toggle"
+                    toggleValue={bgSettings.autoTranscribe}
+                    onToggle={val =>
+                      BackgroundProcessingService.updateSettings({autoTranscribe: val})
+                    }
+                  />
+                ),
+                showSetting('wifiOnlySync') && (
+                  <SettingRow
+                    key="wo"
+                    iconName="wifi"
+                    iconColor="#16A34A"
+                    label="Wi-Fi Only Sync"
+                    type="toggle"
+                    toggleValue={bgSettings.wifiOnly}
+                    onToggle={val =>
+                      BackgroundProcessingService.updateSettings({wifiOnly: val})
+                    }
+                  />
+                ),
+                showSetting('batteryOptimization') && (
+                  <SettingRow
+                    key="bo"
+                    iconName="battery-charging"
+                    iconColor="#16A34A"
+                    label="Battery Optimization"
+                    badge={
+                      bgSettings.batteryOptimizationsIgnored
+                        ? 'Exempted'
+                        : 'Tap to Exempt'
+                    }
+                    badgeColor={
+                      bgSettings.batteryOptimizationsIgnored
+                        ? Colors.successLight
+                        : Colors.warningLight
+                    }
+                    onPress={handleBatteryOptimization}
+                  />
+                ),
+                showSetting('triggerBackgroundScan') && (
+                  <SettingRow
+                    key="tbs"
+                    iconName="refresh"
+                    iconColor="#2563EB"
+                    label="Trigger Background Scan"
+                    value={
+                      isTriggeringSync || bgSettings.lastSyncStatus === 'running'
+                        ? 'Scanning...'
+                        : 'Run Now'
+                    }
+                    onPress={handleTriggerManualBackgroundSync}
+                  />
+                ),
+                showSetting('lastBackgroundCheck') && (
+                  <SettingRow
+                    key="lbc"
+                    iconName="clock-outline"
+                    iconColor={Colors.textTertiary}
+                    label="Last Background Check"
+                    value={formatLastSync(
+                      bgSettings.lastSyncTimestamp,
+                      bgSettings.lastSyncStatus,
+                      bgSettings.lastSyncResult,
+                    )}
+                    type="info"
+                  />
+                ),
+              ]
+                .filter(Boolean)
+                .map((item, idx) => (
+                  <React.Fragment key={idx}>
+                    {idx > 0 && <View style={styles.settingDivider} />}
+                    {item}
+                  </React.Fragment>
+                ))}
+            </Card>
+          </>
+        )}
 
         {/* ── GOOGLE ── */}
-        <SectionHeader title="GOOGLE" />
-        <Card variant="elevated" padding={0} style={styles.settingsGroup}>
-          <SettingRow
-            icon="🗄️"
-            label="Google Drive"
-            badge={driveStatus === 'connected' ? 'Connected' : 'Not Connected'}
-            badgeColor={
-              driveStatus === 'connected'
-                ? Colors.successLight
-                : Colors.warningLight
-            }
-            onPress={handleDriveDetails}
-            isFirst={true}
-          />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="📊"
-            label="Google Sheets"
-            badge={sheetsStatus === 'connected' ? 'Connected' : 'Not Connected'}
-            badgeColor={
-              sheetsStatus === 'connected'
-                ? Colors.successLight
-                : Colors.warningLight
-            }
-            onPress={handleSheetsDetails}
-            isLast={true}
-          />
-        </Card>
+        {(showSetting('googleDrive') || showSetting('googleSheets')) && (
+          <>
+            <SectionHeader title="GOOGLE SERVICES" iconName="google" />
+            <Card variant="elevated" padding={0} style={styles.settingsGroup}>
+              {[
+                showSetting('googleDrive') && (
+                  <SettingRow
+                    key="gd"
+                    iconName="google-drive"
+                    iconColor="#4285F4"
+                    label="Google Drive"
+                    badge={driveStatus === 'connected' ? 'Connected' : 'Not Connected'}
+                    badgeColor={
+                      driveStatus === 'connected'
+                        ? Colors.successLight
+                        : Colors.warningLight
+                    }
+                    onPress={handleDriveDetails}
+                  />
+                ),
+                showSetting('googleSheets') && (
+                  <SettingRow
+                    key="gs"
+                    iconName="google-spreadsheet"
+                    iconColor="#0F9D58"
+                    label="Google Sheets"
+                    badge={sheetsStatus === 'connected' ? 'Connected' : 'Not Connected'}
+                    badgeColor={
+                      sheetsStatus === 'connected'
+                        ? Colors.successLight
+                        : Colors.warningLight
+                    }
+                    onPress={handleSheetsDetails}
+                  />
+                ),
+              ]
+                .filter(Boolean)
+                .map((item, idx) => (
+                  <React.Fragment key={idx}>
+                    {idx > 0 && <View style={styles.settingDivider} />}
+                    {item}
+                  </React.Fragment>
+                ))}
+            </Card>
+          </>
+        )}
 
         {/* ── TRANSCRIPTION ── */}
-        <SectionHeader title="TRANSCRIPTION" />
-        <Card variant="elevated" padding={0} style={styles.settingsGroup}>
-          <SettingRow
-            icon="🎙️"
-            label="Speech-to-Text Provider"
-            value={SUPPORTED_PROVIDERS[selectedProvider]?.name || 'Google Cloud STT'}
-            badge={selectedProvider}
-            badgeColor={Colors.primaryLight}
-            onPress={handleSelectProvider}
-            isFirst={true}
-          />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="🌐"
-            label="Language Detection"
-            type="toggle"
-            toggleValue={langDetection}
-            onToggle={setLangDetection}
-            isLast={true}
-          />
-        </Card>
+        {(showSetting('sttProvider') || showSetting('languageDetection')) && (
+          <>
+            <SectionHeader title="TRANSCRIPTION" iconName="microphone-outline" />
+            <Card variant="elevated" padding={0} style={styles.settingsGroup}>
+              {[
+                showSetting('sttProvider') && (
+                  <SettingRow
+                    key="stt"
+                    iconName="microphone"
+                    iconColor="#DC2626"
+                    label="AI Speech & Transcription Model"
+                    value={
+                      availableModels.find(m => m.id === selectedModelId)?.name ||
+                      SUPPORTED_PROVIDERS[selectedProvider]?.name ||
+                      'Google Cloud STT'
+                    }
+                    badge={
+                      availableModels.find(m => m.id === selectedModelId)?.tier === 'paid'
+                        ? 'PAID'
+                        : 'FREE'
+                    }
+                    badgeColor={
+                      availableModels.find(m => m.id === selectedModelId)?.tier === 'paid'
+                        ? '#FEF3C7'
+                        : '#DCFCE7'
+                    }
+                    onPress={handleSelectProvider}
+                  />
+                ),
+                showSetting('languageDetection') && (
+                  <SettingRow
+                    key="ld"
+                    iconName="web"
+                    iconColor="#2563EB"
+                    label="Language Detection"
+                    type="toggle"
+                    toggleValue={langDetection}
+                    onToggle={setLangDetection}
+                  />
+                ),
+              ]
+                .filter(Boolean)
+                .map((item, idx) => (
+                  <React.Fragment key={idx}>
+                    {idx > 0 && <View style={styles.settingDivider} />}
+                    {item}
+                  </React.Fragment>
+                ))}
+            </Card>
+          </>
+        )}
 
-        {/* ── PRIVACY (Phase 14) ── */}
-        <SectionHeader title="PRIVACY & SECURITY" />
-        <Card variant="elevated" padding={0} style={styles.settingsGroup}>
-          <SettingRow
-            icon="🛡️"
-            label="Privacy & Consent"
-            value="Local-first architecture"
-            onPress={() => setPrivacyModalVisible(true)}
-            isFirst={true}
-          />
-          <View style={styles.settingDivider} />
-          <SettingRow
-            icon="🔒"
-            label="Security & Privacy Audit"
-            value="Hardware KeyStore & TLS"
-            badge="Verified ✓"
-            badgeColor={Colors.successLight}
-            onPress={() => setSecurityModalVisible(true)}
-            isLast={true}
-          />
-        </Card>
+        {/* ── PRIVACY & SECURITY ── */}
+        {(showSetting('privacyConsent') || showSetting('securityAudit')) && (
+          <>
+            <SectionHeader title="PRIVACY & SECURITY" iconName="shield-check-outline" />
+            <Card variant="elevated" padding={0} style={styles.settingsGroup}>
+              {[
+                showSetting('privacyConsent') && (
+                  <SettingRow
+                    key="pc"
+                    iconName="shield-check-outline"
+                    iconColor="#16A34A"
+                    label="Privacy & Consent"
+                    value="Local-first architecture"
+                    onPress={() => setPrivacyModalVisible(true)}
+                  />
+                ),
+                showSetting('securityAudit') && (
+                  <SettingRow
+                    key="sa"
+                    iconName="lock-outline"
+                    iconColor="#16A34A"
+                    label="Security Audit"
+                    value="Hardware KeyStore & TLS"
+                    badge="Verified"
+                    badgeColor={Colors.successLight}
+                    onPress={() => setSecurityModalVisible(true)}
+                  />
+                ),
+                <SettingRow
+                  key="applock"
+                  iconName="shield-key-outline"
+                  iconColor="#7C3AED"
+                  label="App PIN Lock"
+                  value={isAppLockEnabled ? 'KeyStore Hardware PIN' : 'Disabled'}
+                  badge={isAppLockEnabled ? 'Active' : 'Off'}
+                  badgeColor={isAppLockEnabled ? Colors.successLight : Colors.warningLight}
+                  type="toggle"
+                  toggleValue={isAppLockEnabled}
+                  onToggle={handleToggleAppLock}
+                />,
+              ]
+                .filter(Boolean)
+                .map((item, idx) => (
+                  <React.Fragment key={idx}>
+                    {idx > 0 && <View style={styles.settingDivider} />}
+                    {item}
+                  </React.Fragment>
+                ))}
+            </Card>
+          </>
+        )}
 
         {/* ── ABOUT ── */}
-        <SectionHeader title="ABOUT" />
+        <SectionHeader title="ABOUT" iconName="information-outline" />
         <Card variant="elevated" padding={0} style={styles.settingsGroup}>
           <SettingRow
-            icon="ℹ️"
+            iconName="information-outline"
+            iconColor={Colors.textTertiary}
             label="Version"
-            value="1.0.0 (Phase 14 - Audited)"
+            value="1.0.0"
             type="info"
             isFirst={true}
           />
           <View style={styles.settingDivider} />
           <SettingRow
-            icon="📱"
-            label="About TeleCaller AI"
-            onPress={() => handleComingSoon('About')}
+            iconName="cellphone"
+            iconColor={Colors.textTertiary}
+            label="About Audify AI"
+            onPress={() => toast.info('Audify AI', 'Record • Transcribe • Organize • Automate')}
             isLast={true}
           />
         </Card>
 
+        {/* ── BOTTOM ACTIONS: LOGOUT & DELETE ACCOUNT ── */}
+        <View style={styles.bottomActionsSection}>
+          <TouchableOpacity
+            style={styles.logoutButton}
+            onPress={handleSignOut}
+            activeOpacity={0.7}
+            accessibilityLabel="Log out of account"
+            accessibilityRole="button">
+            <Icon name="logout" size={18} color="#DC2626" style={styles.actionButtonIcon} />
+            <Text style={styles.logoutButtonText}>Log Out</Text>
+          </TouchableOpacity>
+
+          {showSetting('deleteAccount') && (
+            <TouchableOpacity
+              style={styles.deleteAccountButton}
+              onPress={handleDeleteAccount}
+              activeOpacity={0.7}
+              accessibilityLabel="Delete account and data"
+              accessibilityRole="button">
+              <Icon name="trash-can-outline" size={16} color="#DC2626" style={styles.actionButtonIcon} />
+              <Text style={styles.deleteAccountButtonText}>Delete Account & Data</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
         <View style={styles.footer}>
-          <Text style={styles.footerText}>TeleCaller AI</Text>
+          <Image
+            source={require('../../assets/logo_main.png')}
+            style={styles.footerLogo}
+            resizeMode="contain"
+          />
           <Text style={styles.footerTagline}>
             Record • Transcribe • Organize
           </Text>
         </View>
       </ScrollView>
 
-      {/* Phase 14: Privacy & Security Modals */}
+      {/* Privacy & Security Modals */}
       <PrivacyConsentModal
         visible={privacyModalVisible}
         onClose={() => setPrivacyModalVisible(false)}
@@ -757,6 +1008,161 @@ const SettingsScreen: React.FC = () => {
         visible={securityModalVisible}
         onClose={() => setSecurityModalVisible(false)}
       />
+      <AppLockModal
+        visible={showAppLockSetup}
+        mode="setup"
+        onSuccess={() => {
+          setShowAppLockSetup(false);
+          setIsAppLockEnabled(true);
+          toast.success('App Lock Enabled', 'Your 4-digit PIN is now active.');
+        }}
+        onCancel={() => setShowAppLockSetup(false)}
+      />
+
+      {/* ── AI Model Picker Modal ── */}
+      <Modal
+        visible={modelPickerVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModelPickerVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderLeft}>
+                <View style={styles.modalHeaderIconBox}>
+                  <Icon name="brain" size={22} color={Colors.primary} />
+                </View>
+                <View>
+                  <Text style={styles.modalHeaderTitle}>Select AI Model</Text>
+                  <Text style={styles.modalHeaderSubtitle}>
+                    Transcription & audio reasoning models
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.modalCloseBtn}
+                onPress={() => setModelPickerVisible(false)}>
+                <Icon name="close" size={20} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Model List */}
+            <ScrollView
+              style={styles.modalScrollView}
+              contentContainerStyle={{paddingBottom: 24}}
+              showsVerticalScrollIndicator={false}>
+              {availableModels.map(model => {
+                const isSelected = selectedModelId === model.id;
+                const isFree = model.tier === 'free';
+
+                return (
+                  <TouchableOpacity
+                    key={model.id}
+                    style={[
+                      styles.modelPickerCard,
+                      isSelected && styles.modelPickerCardSelected,
+                      !isFree && styles.modelPickerCardPaid,
+                    ]}
+                    onPress={async () => {
+                      if (isFree) {
+                        await TranscriptionService.setSelectedProvider(
+                          (model.providerKey === 'CUSTOM' ? 'GOOGLE' : model.providerKey) as any,
+                        );
+                        await ApiModelService.setSelectedModelId(model.id);
+                        setSelectedModelId(model.id);
+                        setSelectedProvider(
+                          (model.providerKey === 'CUSTOM' ? 'GOOGLE' : model.providerKey) as any,
+                        );
+                        setModelPickerVisible(false);
+                        toast.success(
+                          'Model Activated',
+                          `Using ${model.name} for speech transcription.`,
+                        );
+                      } else {
+                        // User requirement: When clicking paid model, open new page showing usage, benefits, and amount
+                        setModelPickerVisible(false);
+                        navigation.navigate('ModelTierDetails', {modelId: model.id});
+                      }
+                    }}
+                    activeOpacity={0.7}>
+                    {/* Top Row: Name and Tier badge */}
+                    <View style={styles.pickerModelHeader}>
+                      <View style={styles.pickerModelTitleRow}>
+                        <View style={styles.pickerProviderTag}>
+                          <Text style={styles.pickerProviderTagText}>
+                            {model.providerKey}
+                          </Text>
+                        </View>
+                        <Text style={styles.pickerModelName}>{model.name}</Text>
+                      </View>
+
+                      {/* Tier Badge */}
+                      <View
+                        style={[
+                          styles.pickerTierBadge,
+                          isFree ? styles.pickerTierBadgeFree : styles.pickerTierBadgePaid,
+                        ]}>
+                        <Icon
+                          name={isFree ? 'check-circle' : 'crown'}
+                          size={11}
+                          color={isFree ? '#15803D' : '#B45309'}
+                          style={{marginRight: 3}}
+                        />
+                        <Text
+                          style={[
+                            styles.pickerTierBadgeText,
+                            isFree
+                              ? styles.pickerTierBadgeTextFree
+                              : styles.pickerTierBadgeTextPaid,
+                          ]}>
+                          {isFree ? 'FREE' : `PAID • ${model.price || '₹199/mo'}`}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Description */}
+                    {model.description ? (
+                      <Text style={styles.pickerModelDesc} numberOfLines={2}>
+                        {model.description}
+                      </Text>
+                    ) : null}
+
+                    {/* Paid Notice / Free Active Indicator */}
+                    {isFree ? (
+                      <View style={styles.pickerFreeRow}>
+                        <Icon
+                          name={isSelected ? 'radiobox-marked' : 'radiobox-blank'}
+                          size={16}
+                          color={isSelected ? Colors.primary : Colors.textTertiary}
+                          style={{marginRight: 6}}
+                        />
+                        <Text
+                          style={[
+                            styles.pickerFreeText,
+                            isSelected && {color: Colors.primary, fontWeight: '700'},
+                          ]}>
+                          {isSelected ? 'Active & Currently Selected' : 'Free Tier • Tap to select'}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={styles.pickerPaidNoticeBox}>
+                        <View style={styles.pickerPaidNoticeLeft}>
+                          <Icon name="lock" size={13} color="#D97706" style={{marginRight: 4}} />
+                          <Text style={styles.pickerPaidNoticeText}>
+                            Temporarily not available • Tap to view tier details & benefits
+                          </Text>
+                        </View>
+                        <Icon name="chevron-right" size={16} color="#D97706" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -769,13 +1175,11 @@ const styles = StyleSheet.create({
 
   // Header
   header: {
-    backgroundColor: Colors.surface,
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.md,
-    paddingBottom: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    ...(Shadow.sm as object),
+    paddingBottom: Spacing.lg,
+    borderBottomLeftRadius: BorderRadius.xl,
+    borderBottomRightRadius: BorderRadius.xl,
   },
   headerTitle: {
     fontSize: FontSize['2xl'],
@@ -792,15 +1196,20 @@ const styles = StyleSheet.create({
   },
 
   // Section header
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    marginBottom: Spacing.sm,
+    marginTop: Spacing.xl,
+    marginLeft: Spacing.sm,
+  },
   sectionHeader: {
     fontSize: FontSize.xs,
     fontWeight: '700',
     color: Colors.textTertiary,
     letterSpacing: 1.2,
     textTransform: 'uppercase',
-    marginBottom: Spacing.sm,
-    marginTop: Spacing.xl,
-    marginLeft: Spacing.sm,
   },
 
   // Settings group
@@ -830,16 +1239,22 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   googleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     alignSelf: 'flex-start',
-    backgroundColor: Colors.successLight,
+    gap: 4,
+    backgroundColor: '#DCFCE7',
+    borderWidth: 1.5,
+    borderColor: '#16A34A',
     paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
+    paddingVertical: 3,
     borderRadius: BorderRadius.full,
+    opacity: 1,
   },
   googleBadgeText: {
     fontSize: FontSize.xs,
-    color: Colors.success,
-    fontWeight: '600',
+    color: '#14532D',
+    fontWeight: '700',
   },
 
   // Setting row
@@ -859,7 +1274,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: BorderRadius.lg,
   },
   settingRowInfo: {
-    opacity: 0.8,
+    opacity: 1,
   },
   settingDivider: {
     height: 1,
@@ -878,9 +1293,6 @@ const styles = StyleSheet.create({
   settingIconDestructive: {
     backgroundColor: Colors.errorLight,
   },
-  settingIconText: {
-    fontSize: 18,
-  },
   settingContent: {
     flex: 1,
   },
@@ -897,39 +1309,245 @@ const styles = StyleSheet.create({
     color: Colors.textTertiary,
     marginTop: 2,
   },
-  chevron: {
-    fontSize: FontSize.xl,
-    color: Colors.textTertiary,
-    fontWeight: '300',
-  },
   badge: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: BorderRadius.full,
     marginLeft: Spacing.sm,
+    opacity: 1,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 1},
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   badgeText: {
-    fontSize: FontSize.xs,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
 
-  // Footer
+  // Footer & Bottom Actions
+  bottomActionsSection: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.xl,
+    gap: Spacing.md,
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1.5,
+    borderColor: '#FECACA',
+    borderRadius: BorderRadius.lg,
+    paddingVertical: 14,
+    gap: 8,
+  },
+  logoutButtonText: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    color: '#DC2626',
+  },
+  deleteAccountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    paddingVertical: 10,
+    gap: 6,
+  },
+  deleteAccountButtonText: {
+    fontSize: FontSize.sm,
+    fontWeight: '600',
+    color: '#DC2626',
+  },
+  actionButtonIcon: {
+    marginRight: 2,
+  },
   footer: {
     alignItems: 'center',
-    paddingTop: Spacing['2xl'],
+    paddingTop: Spacing.xl,
     paddingBottom: Spacing.xl,
   },
-  footerText: {
-    fontSize: FontSize.base,
-    fontWeight: '700',
-    color: Colors.textTertiary,
-    letterSpacing: -0.5,
+  footerLogo: {
+    width: 140,
+    height: 44,
+    opacity: 0.85,
   },
   footerTagline: {
     fontSize: FontSize.xs,
     color: Colors.textTertiary,
     letterSpacing: 1,
     marginTop: 4,
+  },
+
+  // ── AI Model Picker Modal Styles ──
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: BorderRadius.xl,
+    borderTopRightRadius: BorderRadius.xl,
+    maxHeight: '85%',
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.xl,
+    ...(Shadow.lg as object),
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+    marginBottom: Spacing.md,
+  },
+  modalHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  modalHeaderIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.md,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalHeaderTitle: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  modalHeaderSubtitle: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    marginTop: 1,
+  },
+  modalCloseBtn: {
+    padding: 6,
+    borderRadius: BorderRadius.full,
+    backgroundColor: '#F1F5F9',
+  },
+  modalScrollView: {
+    marginTop: 4,
+  },
+  modelPickerCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: BorderRadius.lg,
+    padding: 14,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    marginBottom: 12,
+  },
+  modelPickerCardSelected: {
+    borderColor: Colors.primary,
+    backgroundColor: '#F5F3FF',
+  },
+  modelPickerCardPaid: {
+    borderColor: '#FDE68A',
+    backgroundColor: '#FFFDF5',
+  },
+  pickerModelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  pickerModelTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
+  },
+  pickerProviderTag: {
+    backgroundColor: 'rgba(0, 0, 0, 0.06)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+    marginRight: 8,
+  },
+  pickerProviderTagText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: Colors.textSecondary,
+  },
+  pickerModelName: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    flex: 1,
+  },
+  pickerTierBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+  },
+  pickerTierBadgeFree: {
+    backgroundColor: '#DCFCE7',
+  },
+  pickerTierBadgePaid: {
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  pickerTierBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  pickerTierBadgeTextFree: {
+    color: '#15803D',
+  },
+  pickerTierBadgeTextPaid: {
+    color: '#B45309',
+  },
+  pickerModelDesc: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    lineHeight: 18,
+    marginBottom: 10,
+  },
+  pickerFreeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 4,
+  },
+  pickerFreeText: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+  },
+  pickerPaidNoticeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(254, 240, 138, 0.35)',
+    borderRadius: BorderRadius.md,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    marginTop: 2,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  pickerPaidNoticeLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 6,
+  },
+  pickerPaidNoticeText: {
+    fontSize: 11,
+    color: '#92400E',
+    fontWeight: '600',
+    flex: 1,
   },
 });
 

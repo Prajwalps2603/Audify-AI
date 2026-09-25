@@ -1,4 +1,4 @@
-// TeleCaller AI — useAudioPlayer Hook (Phase 6)
+// TeleCaller AI — useAudioPlayer Hook
 // Provides complete playback state, progress scrubbing, and play/pause controls.
 
 import {useState, useEffect, useCallback, useRef} from 'react';

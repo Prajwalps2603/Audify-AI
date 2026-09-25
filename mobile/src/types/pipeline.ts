@@ -1,4 +1,4 @@
-// TeleCaller AI — Pipeline Types (Phase 11: Automatic End-to-End Pipeline)
+// TeleCaller AI — Pipeline Types
 
 export type PipelineStage =
   | 'QUEUED'

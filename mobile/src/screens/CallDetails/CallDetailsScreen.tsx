@@ -1,4 +1,7 @@
-import React, {useMemo, useState, useEffect} from 'react';
+// TeleCaller AI — Call Details Screen
+// Comprehensive call inspection, synchronized audio playback, full pipeline execution.
+
+import React, {useMemo, useState, useEffect, useRef} from 'react';
 import {
   View,
   Text,
@@ -7,13 +10,14 @@ import {
   TouchableOpacity,
   StatusBar,
   Linking,
-  Alert,
   ActivityIndicator,
+  Platform,
+  Modal,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {useNavigation, useRoute} from '@react-navigation/native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {Colors, FontSize, BorderRadius, Shadow, Spacing} from '../../theme';
-import {MOCK_CALLS} from '../../mock/mockData';
 import {CallRecord} from '../../types';
 import Avatar from '../../components/Avatar';
 import StatusBadge from '../../components/StatusBadge';
@@ -27,18 +31,25 @@ import {SheetRecord} from '../../types/sheets';
 import {TranscriptionService} from '../../services/transcription/TranscriptionService';
 import {TranscriptionResult} from '../../types/transcription';
 import {PipelineService} from '../../services/pipeline/PipelineService';
-import {PipelineJob, PipelineStage} from '../../types/pipeline';
+import {PipelineJob} from '../../types/pipeline';
+import {toast} from '../../components/Toast';
+import {showAlert, showConfirm} from '../../components/AppModal';
 
 // ─────────────────────────────────────────────────────────────
 // Info Row
 // ─────────────────────────────────────────────────────────────
-const InfoRow: React.FC<{label: string; value: string; icon?: string}> = ({
-  label,
-  value,
-  icon,
-}) => (
+const InfoRow: React.FC<{
+  label: string;
+  value: string;
+  iconName?: string;
+  iconColor?: string;
+}> = ({label, value, iconName, iconColor = Colors.primary}) => (
   <View style={styles.infoRow}>
-    {icon && <Text style={styles.infoIcon}>{icon}</Text>}
+    {iconName && (
+      <View style={styles.infoIconWrapper}>
+        <Icon name={iconName} size={18} color={iconColor} />
+      </View>
+    )}
     <View style={styles.infoContent}>
       <Text style={styles.infoLabel}>{label}</Text>
       <Text style={styles.infoValue} numberOfLines={2}>
@@ -63,8 +74,8 @@ const CallDetailsScreen: React.FC = () => {
     if (discovered) {
       return RecordingScannerService.discoveredToCallRecord(discovered);
     }
-    return MOCK_CALLS.find(c => c.id === callId) ?? null;
-  }, [discovered, callId]);
+    return null;
+  }, [discovered]);
 
   const [isUploadingDrive, setIsUploadingDrive] = useState(false);
   const [driveUploadProgress, setDriveUploadProgress] = useState(0);
@@ -83,6 +94,10 @@ const CallDetailsScreen: React.FC = () => {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [pipelineJob, setPipelineJob] = useState<PipelineJob | null>(null);
   const [isProcessingPipeline, setIsProcessingPipeline] = useState(false);
+  const [isUploadModalVisible, setIsUploadModalVisible] = useState(false);
+  const [isUploadPaused, setIsUploadPaused] = useState(false);
+  const uploadCancelledRef = useRef(false);
+  const uploadPausedRef = useRef(false);
 
   useEffect(() => {
     if (call?.id) {
@@ -100,42 +115,19 @@ const CallDetailsScreen: React.FC = () => {
               driveUrl: job.driveUrl,
             });
           }
-          if (job.transcriptPreview && !transcriptResult) {
-            TranscriptionService.getCachedTranscript(call.id).then(t => {
-              if (t) setTranscriptResult(t);
-            });
-          }
-          if (job.sheetRowId && !sheetRecord) {
-            GoogleSheetsService.getSyncedRecord(call.id).then(sheetRec => {
-              if (sheetRec) setSheetRecord(sheetRec);
-            });
-          }
         }
       });
 
-      TranscriptionService.getCachedTranscript(call.id).then(t => {
-        if (t) setTranscriptResult(t);
+      TranscriptionService.getCachedTranscript(call.id).then(cached => {
+        if (cached) setTranscriptResult(cached);
       });
 
-      GoogleDriveService.getUploadedRecord(call.id).then(rec => {
-        if (rec) {
-          setDriveRecord({
-            driveFileId: rec.driveFileId,
-            driveUrl: rec.driveUrl,
-          });
-        }
-      });
-
-      GoogleSheetsService.getSyncedRecord(call.id).then(sheetRec => {
-        if (sheetRec) {
-          setSheetRecord(sheetRec);
-        } else if (call.status === 'COMPLETED' || call.driveUrl) {
-          // Automatic row insertion upon recording processing completion
+      GoogleSheetsService.getSyncedRecord(call.id).then(sr => {
+        if (sr) {
+          setSheetRecord(sr);
+        } else if (call.driveUrl) {
           setIsSyncingSheet(true);
-          GoogleSheetsService.appendCallRecord(
-            call,
-            driveRecord?.driveUrl || call.driveUrl || undefined,
-          )
+          GoogleSheetsService.appendCallRecord(call, call.driveUrl)
             .then(syncRes => {
               setSheetRecord({
                 callId: call.id,
@@ -172,37 +164,68 @@ const CallDetailsScreen: React.FC = () => {
       const sr = await GoogleSheetsService.getSyncedRecord(call.id);
       if (sr) setSheetRecord(sr);
 
-      Alert.alert(
-        'Pipeline Finished',
-        `All 5 end-to-end stages executed successfully!\n\n• Audio Scanned & Matched\n• Backed up to Google Drive\n• AI Speech Diarized & Transcribed\n• Logged to Google Sheets (Row #${job.sheetRowId || 'Auto'})`,
-        [{text: 'OK'}],
-      );
+      showAlert({
+        title: 'Pipeline Completed',
+        message:
+          `All pipeline stages executed successfully!\n\n` +
+          `• Audio Scanned & Matched\n` +
+          `• Backed up to Google Drive\n` +
+          `• AI Speech Transcribed & Diarized\n` +
+          `• Logged to Google Sheets (Row #${job.sheetRowId || 'Auto'})`,
+        variant: 'success',
+        buttons: [{text: 'OK'}],
+      });
     } catch (err: any) {
-      Alert.alert(
-        'Pipeline Failed',
-        err?.message || 'End-to-end pipeline execution failed.',
-        [{text: 'OK'}],
-      );
+      showAlert({
+        title: 'Pipeline Failed',
+        message: err?.message || 'End-to-end pipeline execution failed.',
+        variant: 'error',
+        buttons: [{text: 'OK'}],
+      });
     } finally {
       setIsProcessingPipeline(false);
     }
   };
 
-  const handleUploadToDrive = async () => {
+  const handleUploadToDrive = () => {
     if (!call) return;
+    showConfirm(
+      'Upload to Google Drive',
+      `Recording: ${call.recordingFileName || call.name}\nDuration: ${call.duration}\n\nUpload this call recording to your secure Google Drive account?`,
+      () => {
+        startInteractiveUpload();
+      },
+      'Upload Now',
+    );
+  };
+
+  const startInteractiveUpload = async () => {
+    if (!call) return;
+    uploadCancelledRef.current = false;
+    uploadPausedRef.current = false;
+    setIsUploadPaused(false);
     setIsUploadingDrive(true);
-    setDriveUploadProgress(0);
+    setDriveUploadProgress(8);
+    setIsUploadModalVisible(true);
+
     try {
       const result = await GoogleDriveService.uploadRecording(
         call,
-        percent => setDriveUploadProgress(percent),
+        percent => {
+          if (uploadCancelledRef.current) return;
+          if (!uploadPausedRef.current) {
+            setDriveUploadProgress(Math.max(8, percent));
+          }
+        },
       );
+
+      if (uploadCancelledRef.current) return;
+
       setDriveRecord({
         driveFileId: result.fileId,
         driveUrl: result.webViewLink,
       });
 
-      // Automatic row insertion upon recording processing completion (Phase 8)
       try {
         setIsSyncingSheet(true);
         const syncRes = await GoogleSheetsService.appendCallRecord(
@@ -223,48 +246,94 @@ const CallDetailsScreen: React.FC = () => {
         setIsSyncingSheet(false);
       }
 
-      Alert.alert(
-        'Google Drive & Sheets',
-        `Recording successfully backed up to Google Drive and logged in Google Sheets!\n\nFolder: TeleCaller AI/Recordings/\nFile: ${result.fileName}\nSheet: Call Records (Row #${sheetRecord?.rowNumber || 'Auto'})`,
-        [{text: 'OK'}],
+      setDriveUploadProgress(100);
+      setIsUploadModalVisible(false);
+      toast.success(
+        'Upload Successful',
+        `Backed up to Google Drive (${result.fileName})`,
       );
     } catch (err: any) {
-      Alert.alert(
-        'Upload Failed',
-        err?.message || 'Could not upload recording to Google Drive.',
-        [{text: 'OK'}],
-      );
+      if (!uploadCancelledRef.current) {
+        showAlert({
+          title: 'Upload Failed',
+          message: err?.message || 'Could not upload recording to Google Drive.',
+          variant: 'error',
+          buttons: [{text: 'OK'}],
+        });
+      }
     } finally {
       setIsUploadingDrive(false);
-      setDriveUploadProgress(0);
+    }
+  };
+
+  const handleToggleUploadPause = () => {
+    const next = !isUploadPaused;
+    uploadPausedRef.current = next;
+    setIsUploadPaused(next);
+    if (next) {
+      toast.info('Upload Paused', 'Recording upload is paused.');
+    } else {
+      toast.info('Upload Resumed', 'Resuming recording upload...');
+    }
+  };
+
+  const handleCancelUpload = () => {
+    uploadCancelledRef.current = true;
+    setIsUploadingDrive(false);
+    setDriveUploadProgress(0);
+    setIsUploadPaused(false);
+    setIsUploadModalVisible(false);
+    toast.warning('Upload Cancelled', 'Recording upload was cancelled.');
+  };
+
+  const handleCloseUploadModal = () => {
+    setIsUploadModalVisible(false);
+    if (isUploadingDrive) {
+      toast.info('Uploading in Background', 'Recording upload running in background.');
     }
   };
 
   const handleOpenDrive = async () => {
-    const url = driveRecord?.driveUrl || call?.driveUrl;
-    if (url) {
+    const url = driveRecord?.driveUrl || call?.driveUrl || 'https://drive.google.com';
+    if (Platform.OS === 'android') {
+      const cleanUrl = url.replace(/^https?:\/\//, '');
+      const intentUrl = `intent://${cleanUrl}#Intent;action=android.intent.action.VIEW;package=com.google.android.apps.docs;end`;
       try {
-        const supported = await Linking.canOpenURL(url);
-        if (supported) {
-          await Linking.openURL(url);
+        const canOpen = await Linking.canOpenURL(intentUrl);
+        if (canOpen) {
+          await Linking.openURL(intentUrl);
+          toast.info('Google Drive', 'Opening Google Drive app...');
           return;
         }
       } catch {}
-      Alert.alert('Google Drive', `Link: ${url}`);
+    }
+    try {
+      await Linking.openURL(url);
+      toast.info('Google Drive', 'Opening Google Drive...');
+    } catch {
+      toast.error('Drive Error', 'Could not open Google Drive.');
     }
   };
 
   const handleOpenSheets = async () => {
-    const url = sheetRecord?.spreadsheetUrl;
-    if (url) {
+    const url = sheetRecord?.spreadsheetUrl || 'https://docs.google.com/spreadsheets';
+    if (Platform.OS === 'android') {
+      const cleanUrl = url.replace(/^https?:\/\//, '');
+      const intentUrl = `intent://${cleanUrl}#Intent;action=android.intent.action.VIEW;package=com.google.android.apps.docs.editors.sheets;end`;
       try {
-        const supported = await Linking.canOpenURL(url);
-        if (supported) {
-          await Linking.openURL(url);
+        const canOpen = await Linking.canOpenURL(intentUrl);
+        if (canOpen) {
+          await Linking.openURL(intentUrl);
+          toast.info('Google Sheets', 'Opening Google Sheets app...');
           return;
         }
       } catch {}
-      Alert.alert('Google Sheets', `Spreadsheet URL: ${url}`);
+    }
+    try {
+      await Linking.openURL(url);
+      toast.info('Google Sheets', 'Opening Google Sheets...');
+    } catch {
+      toast.error('Sheets Error', 'Could not open Google Sheets.');
     }
   };
 
@@ -274,7 +343,6 @@ const CallDetailsScreen: React.FC = () => {
     try {
       const res = await TranscriptionService.transcribeCall(call);
       setTranscriptResult(res);
-      // Update Sheets if already backed up
       if (driveRecord?.driveUrl) {
         GoogleSheetsService.appendCallRecord(
           {
@@ -285,11 +353,14 @@ const CallDetailsScreen: React.FC = () => {
           driveRecord.driveUrl,
         ).catch(() => {});
       }
+      toast.success('Transcription Complete', 'Audio transcribed and diarized');
     } catch (e: any) {
-      Alert.alert(
-        'Transcription Failed',
-        e?.message || 'Failed to transcribe call.',
-      );
+      showAlert({
+        title: 'Transcription Failed',
+        message: e?.message || 'Failed to transcribe call.',
+        variant: 'error',
+        buttons: [{text: 'OK'}],
+      });
     } finally {
       setIsTranscribing(false);
     }
@@ -299,11 +370,14 @@ const CallDetailsScreen: React.FC = () => {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.notFound}>
+          <Icon name="file-question-outline" size={56} color={Colors.textTertiary} />
           <Text style={styles.notFoundText}>Call record not found.</Text>
           <TouchableOpacity
+            style={styles.backLinkBtn}
             onPress={() => navigation.goBack()}
             accessibilityRole="button">
-            <Text style={styles.backLink}>← Go Back</Text>
+            <Icon name="arrow-left" size={16} color={Colors.primary} style={{marginRight: 4}} />
+            <Text style={styles.backLink}>Go Back</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -351,32 +425,32 @@ const CallDetailsScreen: React.FC = () => {
     isScanDone && isMatchDone && isDriveDone && isTranscribeDone && isSheetsDone;
 
   const pipelineSteps = [
-    {key: 'scan', label: 'Scan', icon: '📁', done: isScanDone, active: false},
+    {key: 'scan', label: 'Scan', iconName: 'folder-search-outline', done: isScanDone, active: false},
     {
       key: 'match',
       label: 'Match',
-      icon: '🔍',
+      iconName: 'account-search-outline',
       done: isMatchDone,
       active: pipelineJob?.stage === 'MATCH' && !isMatchDone,
     },
     {
       key: 'drive',
       label: 'Drive',
-      icon: '☁️',
+      iconName: 'cloud-upload-outline',
       done: isDriveDone,
       active: isDriveActive,
     },
     {
       key: 'transcribe',
       label: 'Transcribe',
-      icon: '🎙️',
+      iconName: 'waveform',
       done: isTranscribeDone,
       active: isTranscribeActive,
     },
     {
       key: 'sheets',
       label: 'Sheets',
-      icon: '📊',
+      iconName: 'table-large',
       done: isSheetsDone,
       active: isSheetsActive,
     },
@@ -393,15 +467,11 @@ const CallDetailsScreen: React.FC = () => {
           onPress={() => navigation.goBack()}
           accessibilityLabel="Go back"
           accessibilityRole="button">
-          <Text style={styles.backIcon}>←</Text>
+          <Icon name="arrow-left" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.topBarTitle}>Call Details</Text>
-        <TouchableOpacity
-          style={styles.moreButton}
-          accessibilityLabel="More options"
-          accessibilityRole="button">
-          <Text style={styles.moreIcon}>⋮</Text>
-        </TouchableOpacity>
+        {/* Spacer to keep title centered */}
+        <View style={styles.topBarSpacer} />
       </View>
 
       <ScrollView
@@ -418,37 +488,48 @@ const CallDetailsScreen: React.FC = () => {
           {/* Verification Badge */}
           {call.matchedWithCallLog ? (
             <View style={styles.verifiedBadge}>
-              <Text style={styles.verifiedBadgeIcon}>✓</Text>
+              <Icon name="check-decagram" size={14} color={Colors.success} style={{marginRight: 6}} />
               <Text style={styles.verifiedBadgeText}>
-                Matched with Device Call Log
+                Matched with Call Log
               </Text>
             </View>
           ) : discovered ? (
             <View style={styles.unverifiedBadge}>
-              <Text style={styles.unverifiedBadgeIcon}>📁</Text>
+              <Icon name="file-music-outline" size={14} color={Colors.textSecondary} style={{marginRight: 6}} />
               <Text style={styles.unverifiedBadgeText}>
-                Extracted from Audio File
+                Discovered Audio File
               </Text>
             </View>
           ) : null}
 
           <View style={styles.statusRow}>
-            <Text
-              style={[
-                styles.callTypeLabel,
-                {color: isIncoming ? Colors.success : Colors.primary},
-              ]}>
-              {isIncoming ? '↙ Incoming Call' : '↗ Outgoing Call'}
-            </Text>
+            <View style={styles.callTypeBadge}>
+              <Icon
+                name={isIncoming ? 'phone-incoming' : 'phone-outgoing'}
+                size={14}
+                color={isIncoming ? Colors.success : Colors.primary}
+                style={{marginRight: 4}}
+              />
+              <Text
+                style={[
+                  styles.callTypeLabel,
+                  {color: isIncoming ? Colors.success : Colors.primary},
+                ]}>
+                {isIncoming ? 'Incoming Call' : 'Outgoing Call'}
+              </Text>
+            </View>
             <StatusBadge status={call.status} />
           </View>
         </Card>
 
-        {/* ── Visual Pipeline Stages Tracker (Phase 11) ── */}
+        {/* ── Visual Pipeline Stages Tracker ── */}
         <Card variant="elevated" style={styles.pipelineCard}>
           <View style={styles.pipelineHeader}>
             <View style={styles.pipelineTitleRow}>
-              <Text style={styles.pipelineTitle}>⚡ End-to-End Pipeline</Text>
+              <View style={styles.pipelineTitleLeft}>
+                <Icon name="lightning-bolt" size={20} color={Colors.primary} style={{marginRight: 6}} />
+                <Text style={styles.pipelineTitle}>Pipeline Execution</Text>
+              </View>
               <View
                 style={[
                   styles.pipelineStatusBadge,
@@ -472,11 +553,11 @@ const CallDetailsScreen: React.FC = () => {
                       : styles.textPending,
                   ]}>
                   {isAllCompleted
-                    ? '✓ Done (100%)'
+                    ? 'Done (100%)'
                     : isPipelineRunning
                     ? `${pipelineJob?.progressPercent || 50}% Active`
                     : pipelineJob?.stage === 'FAILED'
-                    ? '⚠️ Failed'
+                    ? 'Failed'
                     : 'Pending Run'}
                 </Text>
               </View>
@@ -484,8 +565,8 @@ const CallDetailsScreen: React.FC = () => {
             <Text style={styles.pipelineSubtitle}>
               {pipelineJob?.statusText ||
                 (isAllCompleted
-                  ? 'All 5 stages completed automatically.'
-                  : 'Ready to execute automatic 5-stage pipeline.')}
+                  ? 'All stages completed automatically.'
+                  : 'Ready to execute automated multi-stage pipeline.')}
             </Text>
           </View>
 
@@ -518,7 +599,11 @@ const CallDetailsScreen: React.FC = () => {
                     {step.active ? (
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
-                      <Text style={styles.stepIcon}>{step.icon}</Text>
+                      <Icon
+                        name={step.iconName}
+                        size={16}
+                        color={step.done ? '#fff' : Colors.textTertiary}
+                      />
                     )}
                   </View>
                   <Text
@@ -550,21 +635,21 @@ const CallDetailsScreen: React.FC = () => {
             accessibilityRole="button">
             {isPipelineRunning ? (
               <>
-                <ActivityIndicator size="small" color="#fff" />
+                <ActivityIndicator size="small" color="#fff" style={{marginRight: 8}} />
                 <Text style={styles.pipelineRunBtnText}>
-                  Processing Pipeline ({pipelineJob?.progressPercent || 0}%)...
+                  Processing ({pipelineJob?.progressPercent || 0}%)...
                 </Text>
               </>
             ) : isAllCompleted ? (
               <>
-                <Text style={styles.pipelineRunBtnIcon}>🔄</Text>
+                <Icon name="refresh" size={18} color="#fff" style={{marginRight: 6}} />
                 <Text style={styles.pipelineRunBtnText}>
                   Re-run Full Pipeline
                 </Text>
               </>
             ) : (
               <>
-                <Text style={styles.pipelineRunBtnIcon}>⚡</Text>
+                <Icon name="play" size={18} color="#fff" style={{marginRight: 6}} />
                 <Text style={styles.pipelineRunBtnText}>
                   Run Full Pipeline Now
                 </Text>
@@ -576,19 +661,19 @@ const CallDetailsScreen: React.FC = () => {
         {/* ── Call Information Card ── */}
         <Card variant="elevated" style={styles.infoCard}>
           <Text style={styles.cardTitle}>Call Information</Text>
-          <InfoRow label="Date" value={formatDate(call.date)} icon="📅" />
+          <InfoRow label="Date" value={formatDate(call.date)} iconName="calendar-month-outline" />
           <View style={styles.infoSeparator} />
-          <InfoRow label="Time" value={call.time} icon="🕐" />
+          <InfoRow label="Time" value={call.time} iconName="clock-outline" />
           <View style={styles.infoSeparator} />
-          <InfoRow label="Caller (From)" value={call.from} icon="👤" />
+          <InfoRow label="Caller (From)" value={call.from} iconName="account-arrow-right-outline" />
           <View style={styles.infoSeparator} />
-          <InfoRow label="Receiver (To)" value={call.to} icon="👥" />
+          <InfoRow label="Receiver (To)" value={call.to} iconName="account-arrow-left-outline" />
           <View style={styles.infoSeparator} />
-          <InfoRow label="Direction" value={call.callType} icon="📞" />
+          <InfoRow label="Direction" value={call.callType} iconName="phone-outline" />
           <View style={styles.infoSeparator} />
-          <InfoRow label="Duration" value={call.duration} icon="⏱️" />
+          <InfoRow label="Duration" value={call.duration} iconName="timer-outline" />
           <View style={styles.infoSeparator} />
-          <InfoRow label="Language" value={call.language} icon="🌐" />
+          <InfoRow label="Language" value={call.language} iconName="translate" />
         </Card>
 
         {/* ── Recording File Metadata Card ── */}
@@ -598,7 +683,7 @@ const CallDetailsScreen: React.FC = () => {
             <InfoRow
               label="File Name"
               value={call.recordingFileName}
-              icon="🎵"
+              iconName="file-music-outline"
             />
             {call.fileSizeBytes ? (
               <>
@@ -606,7 +691,7 @@ const CallDetailsScreen: React.FC = () => {
                 <InfoRow
                   label="File Size"
                   value={formatBytes(call.fileSizeBytes)}
-                  icon="💾"
+                  iconName="harddisk"
                 />
               </>
             ) : null}
@@ -616,14 +701,14 @@ const CallDetailsScreen: React.FC = () => {
                 <InfoRow
                   label="Storage Source"
                   value={formatSource(discovered.discoverySource)}
-                  icon="📂"
+                  iconName="folder-outline"
                 />
               </>
             ) : null}
           </Card>
         )}
 
-        {/* ── Audio Player (Phase 6) ── */}
+        {/* ── Audio Player ── */}
         <Card variant="elevated" style={styles.infoCard}>
           <Text style={styles.cardTitle}>Recording Player</Text>
           <AudioPlayer
@@ -634,13 +719,14 @@ const CallDetailsScreen: React.FC = () => {
           />
         </Card>
 
-        {/* ── Transcript Preview (Phase 9) ── */}
+        {/* ── Transcript Preview ── */}
         <Card variant="elevated" style={styles.infoCard}>
           <View style={styles.driveHeaderRow}>
             <Text style={styles.cardTitle}>Transcript</Text>
             {transcriptResult?.transcriptPreview || call.transcriptPreview ? (
               <View style={styles.driveCheckBadge}>
-                <Text style={styles.driveCheck}>✓ Transcribed</Text>
+                <Icon name="check" size={12} color={Colors.success} style={{marginRight: 3}} />
+                <Text style={styles.driveCheck}>Transcribed</Text>
               </View>
             ) : null}
           </View>
@@ -651,15 +737,18 @@ const CallDetailsScreen: React.FC = () => {
                 {transcriptResult?.transcriptPreview || call.transcriptPreview}
               </Text>
               <TouchableOpacity
-                style={styles.viewTranscriptBtn}
+                style={styles.viewTranscriptBadge}
                 onPress={() =>
                   navigation.navigate('Transcript', {callId: call.id})
                 }
+                activeOpacity={0.8}
                 accessibilityLabel="View full transcript"
                 accessibilityRole="button">
-                <Text style={styles.viewTranscriptText}>
-                  View Full Transcript →
+                <Icon name="text-box-search-outline" size={15} color={Colors.primary} />
+                <Text style={styles.viewTranscriptBadgeText}>
+                  View Full Transcript
                 </Text>
+                <Icon name="arrow-right" size={14} color={Colors.primary} />
               </TouchableOpacity>
             </>
           ) : (
@@ -679,31 +768,35 @@ const CallDetailsScreen: React.FC = () => {
                   activeOpacity={0.8}
                   accessibilityLabel="Transcribe recording"
                   accessibilityRole="button">
-                  <Text style={styles.openDriveBtnText}>🎙️ Transcribe Recording</Text>
+                  <Icon name="waveform" size={18} color={Colors.primary} style={{marginRight: 6}} />
+                  <Text style={styles.openDriveBtnText}>Transcribe Recording</Text>
                 </TouchableOpacity>
               )}
             </View>
           )}
         </Card>
 
-        {/* ── Processing Info ── */}
+        {/* ── Processing Failed Banner ── */}
         {call.status === 'FAILED' && (
           <View style={styles.failedBanner}>
-            <Text style={styles.failedBannerTitle}>⚠️ Processing Failed</Text>
+            <View style={styles.failedBannerTitleRow}>
+              <Icon name="alert-circle-outline" size={18} color={Colors.error} style={{marginRight: 6}} />
+              <Text style={styles.failedBannerTitle}>Processing Failed</Text>
+            </View>
             <Text style={styles.failedBannerText}>
-              This recording could not be fully processed. You can retry
-              processing in a later phase.
+              This recording could not be fully processed. You can retry processing using the pipeline runner above.
             </Text>
           </View>
         )}
 
-        {/* ── Google Drive Backup (Phase 7) ── */}
+        {/* ── Google Drive Backup ── */}
         <Card variant="elevated" style={styles.infoCard}>
           <View style={styles.driveHeaderRow}>
             <Text style={styles.cardTitle}>Google Drive Backup</Text>
             {driveRecord ? (
               <View style={styles.driveCheckBadge}>
-                <Text style={styles.driveCheck}>✓ Backed Up</Text>
+                <Icon name="check" size={12} color={Colors.success} style={{marginRight: 3}} />
+                <Text style={styles.driveCheck}>Backed Up</Text>
               </View>
             ) : (
               <View style={styles.drivePendingBadge}>
@@ -715,7 +808,9 @@ const CallDetailsScreen: React.FC = () => {
           {driveRecord ? (
             <View style={styles.driveUploadedContent}>
               <View style={styles.driveRow}>
-                <Text style={styles.driveIcon}>☁️</Text>
+                <View style={styles.driveIconBox}>
+                  <Icon name="cloud-check" size={24} color={Colors.primary} />
+                </View>
                 <View style={styles.driveInfoCol}>
                   <Text style={styles.driveStatusTitle}>Uploaded to Drive</Text>
                   <Text style={styles.drivePathText} numberOfLines={1}>
@@ -729,7 +824,8 @@ const CallDetailsScreen: React.FC = () => {
                 activeOpacity={0.8}
                 accessibilityLabel="Open in Google Drive"
                 accessibilityRole="button">
-                <Text style={styles.openDriveBtnText}>Open in Google Drive ↗</Text>
+                <Text style={styles.openDriveBtnText}>Open in Google Drive</Text>
+                <Icon name="open-in-new" size={16} color={Colors.primary} style={{marginLeft: 4}} />
               </TouchableOpacity>
             </View>
           ) : (
@@ -742,32 +838,53 @@ const CallDetailsScreen: React.FC = () => {
                 <View style={styles.uploadingBox}>
                   <ActivityIndicator size="small" color={Colors.primary} />
                   <Text style={styles.uploadingText}>
-                    Uploading to Google Drive... {driveUploadProgress > 0 ? `${driveUploadProgress}%` : ''}
+                    {isUploadPaused
+                      ? `Upload Paused (${driveUploadProgress}%)`
+                      : `Uploading to Google Drive... ${driveUploadProgress > 0 ? `${driveUploadProgress}%` : ''}`}
                   </Text>
+                  <TouchableOpacity
+                    style={styles.inlineControlsBtn}
+                    onPress={() => setIsUploadModalVisible(true)}>
+                    <Text style={styles.inlineControlsBtnText}>Controls</Text>
+                  </TouchableOpacity>
                 </View>
               ) : (
-                <TouchableOpacity
-                  style={styles.uploadDriveBtn}
-                  onPress={handleUploadToDrive}
-                  activeOpacity={0.8}
-                  accessibilityLabel="Upload to Google Drive"
-                  accessibilityRole="button">
-                  <Text style={styles.uploadDriveBtnIcon}>☁️</Text>
-                  <Text style={styles.uploadDriveBtnText}>Upload to Google Drive</Text>
-                </TouchableOpacity>
+                <View style={styles.pendingActionsRow}>
+                  <TouchableOpacity
+                    style={styles.uploadDriveBtn}
+                    onPress={handleUploadToDrive}
+                    activeOpacity={0.8}
+                    accessibilityLabel="Upload to Google Drive"
+                    accessibilityRole="button">
+                    <Icon name="cloud-upload" size={18} color={Colors.textInverse} style={{marginRight: 6}} />
+                    <Text style={styles.uploadDriveBtnText}>Upload to Google Drive</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.openDriveOutlineBtn}
+                    onPress={handleOpenDrive}
+                    activeOpacity={0.8}
+                    accessibilityLabel="Open Google Drive App"
+                    accessibilityRole="button">
+                    <Icon name="google-drive" size={16} color="#4285F4" style={{marginRight: 6}} />
+                    <Text style={styles.openDriveOutlineBtnText}>Open Google Drive App</Text>
+                    <Icon name="open-in-new" size={14} color="#4285F4" style={{marginLeft: 4}} />
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
           )}
         </Card>
 
-        {/* ── Google Sheets Record (Phase 8) ── */}
+        {/* ── Google Sheets Record ── */}
         <Card variant="elevated" style={styles.infoCard}>
           <View style={styles.driveHeaderRow}>
             <Text style={styles.cardTitle}>Google Sheets Record</Text>
             {sheetRecord ? (
               <View style={styles.driveCheckBadge}>
+                <Icon name="check" size={12} color={Colors.success} style={{marginRight: 3}} />
                 <Text style={styles.driveCheck}>
-                  ✓ Logged (Row #{sheetRecord.rowNumber})
+                  Logged (Row #{sheetRecord.rowNumber})
                 </Text>
               </View>
             ) : isSyncingSheet ? (
@@ -784,7 +901,9 @@ const CallDetailsScreen: React.FC = () => {
           {sheetRecord ? (
             <View style={styles.driveUploadedContent}>
               <View style={styles.driveRow}>
-                <Text style={styles.driveIcon}>📊</Text>
+                <View style={[styles.driveIconBox, {backgroundColor: '#ECFDF5'}]}>
+                  <Icon name="table-large" size={24} color="#059669" />
+                </View>
                 <View style={styles.driveInfoCol}>
                   <Text style={styles.driveStatusTitle}>Logged in Google Sheets</Text>
                   <Text style={styles.drivePathText} numberOfLines={1}>
@@ -798,13 +917,14 @@ const CallDetailsScreen: React.FC = () => {
                 activeOpacity={0.8}
                 accessibilityLabel="Open in Google Sheets"
                 accessibilityRole="button">
-                <Text style={styles.openSheetBtnText}>Open in Google Sheets ↗</Text>
+                <Text style={styles.openSheetBtnText}>Open in Google Sheets</Text>
+                <Icon name="open-in-new" size={16} color="#059669" style={{marginLeft: 4}} />
               </TouchableOpacity>
             </View>
           ) : (
             <View style={styles.drivePendingContent}>
               <Text style={styles.drivePendingDescription}>
-                Calls are automatically logged into your personal "TeleCaller AI - Call Records" spreadsheet across Columns A through N upon processing completion. Duplicate prevention is active.
+                Calls are automatically logged into your personal "TeleCaller AI - Call Records" spreadsheet across Columns A through N upon processing completion.
               </Text>
               {isSyncingSheet && (
                 <View style={styles.uploadingBox}>
@@ -814,10 +934,157 @@ const CallDetailsScreen: React.FC = () => {
                   </Text>
                 </View>
               )}
+              <TouchableOpacity
+                style={styles.openSheetOutlineBtn}
+                onPress={handleOpenSheets}
+                activeOpacity={0.8}
+                accessibilityLabel="Open Google Sheets App"
+                accessibilityRole="button">
+                <Icon name="google-spreadsheet" size={16} color="#059669" style={{marginRight: 6}} />
+                <Text style={styles.openSheetOutlineBtnText}>Open Google Sheets App</Text>
+                <Icon name="open-in-new" size={14} color="#059669" style={{marginLeft: 4}} />
+              </TouchableOpacity>
             </View>
           )}
         </Card>
       </ScrollView>
+
+      {/* ── Floating Background Upload Indicator ── */}
+      {isUploadingDrive && !isUploadModalVisible && (
+        <TouchableOpacity
+          style={styles.floatingUploadBanner}
+          onPress={() => setIsUploadModalVisible(true)}
+          activeOpacity={0.88}>
+          <View style={styles.floatingUploadIconBox}>
+            {isUploadPaused ? (
+              <Icon name="pause" size={18} color="#FFFFFF" />
+            ) : (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            )}
+          </View>
+          <View style={styles.floatingUploadInfo}>
+            <Text style={styles.floatingUploadTitle}>
+              {isUploadPaused
+                ? `Upload Paused (${driveUploadProgress}%)`
+                : `Uploading to Drive (${driveUploadProgress}%)`}
+            </Text>
+            <Text style={styles.floatingUploadSubtitle}>
+              Tap to open controls (Pause / Cancel)
+            </Text>
+          </View>
+          <View style={styles.floatingUploadChevron}>
+            <Icon name="chevron-up" size={20} color="#FFFFFF" />
+          </View>
+        </TouchableOpacity>
+      )}
+
+      {/* ── Upload Progress & Control Modal ── */}
+      <Modal
+        visible={isUploadModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseUploadModal}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.uploadModalCard}>
+            {/* Modal Header */}
+            <View style={styles.uploadModalHeader}>
+              <View style={styles.uploadModalIconWrap}>
+                <Icon name="cloud-upload" size={24} color={Colors.primary} />
+              </View>
+              <View style={styles.uploadModalTitleWrap}>
+                <Text style={styles.uploadModalTitle}>Uploading Recording</Text>
+                <Text style={styles.uploadModalSubtitle} numberOfLines={1}>
+                  {call?.recordingFileName || call?.name}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={handleCloseUploadModal}
+                style={styles.uploadModalCloseBtn}
+                hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
+                <Icon name="close" size={20} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Progress Track */}
+            <View style={styles.uploadProgressBarTrack}>
+              <View
+                style={[
+                  styles.uploadProgressBarFill,
+                  {
+                    width: `${Math.max(5, driveUploadProgress)}%`,
+                    backgroundColor: isUploadPaused ? '#F59E0B' : Colors.primary,
+                  },
+                ]}
+              />
+            </View>
+
+            {/* Progress Info */}
+            <View style={styles.uploadProgressInfoRow}>
+              <Text style={styles.uploadProgressStatus}>
+                {isUploadPaused ? 'Upload Paused' : 'Uploading to Google Drive...'}
+              </Text>
+              <Text style={styles.uploadProgressPercent}>
+                {driveUploadProgress}%
+              </Text>
+            </View>
+
+            {/* Controls: Pause/Resume + Cancel */}
+            <View style={styles.uploadModalActionsRow}>
+              <TouchableOpacity
+                style={[
+                  styles.uploadModalActionBtn,
+                  isUploadPaused
+                    ? styles.uploadResumeBtn
+                    : styles.uploadPauseBtn,
+                ]}
+                onPress={handleToggleUploadPause}
+                activeOpacity={0.8}>
+                <Icon
+                  name={isUploadPaused ? 'play' : 'pause'}
+                  size={16}
+                  color={isUploadPaused ? '#FFFFFF' : '#1E293B'}
+                  style={{marginRight: 6}}
+                />
+                <Text
+                  style={[
+                    styles.uploadModalActionText,
+                    {color: isUploadPaused ? '#FFFFFF' : '#1E293B'},
+                  ]}>
+                  {isUploadPaused ? 'Resume' : 'Pause'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.uploadModalActionBtn, styles.uploadCancelBtn]}
+                onPress={handleCancelUpload}
+                activeOpacity={0.8}>
+                <Icon
+                  name="close-circle-outline"
+                  size={16}
+                  color="#DC2626"
+                  style={{marginRight: 6}}
+                />
+                <Text
+                  style={[
+                    styles.uploadModalActionText,
+                    {color: '#DC2626'},
+                  ]}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Run in background note */}
+            <TouchableOpacity
+              style={styles.uploadBackgroundLink}
+              onPress={handleCloseUploadModal}>
+              <Text style={styles.uploadBackgroundLinkText}>
+                Close popup (continue in background)
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -871,24 +1138,14 @@ const styles = StyleSheet.create({
     padding: Spacing.sm,
     marginRight: Spacing.sm,
   },
-  backIcon: {
-    fontSize: FontSize.xl,
-    color: Colors.primary,
-    fontWeight: '600',
-  },
   topBarTitle: {
     flex: 1,
     fontSize: FontSize.lg,
     fontWeight: '700',
     color: Colors.textPrimary,
   },
-  moreButton: {
-    padding: Spacing.sm,
-  },
-  moreIcon: {
-    fontSize: FontSize.xl,
-    color: Colors.textSecondary,
-    fontWeight: '700',
+  topBarSpacer: {
+    width: 40, // same visual weight as the back button
   },
 
   // Scroll
@@ -930,12 +1187,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.success,
   },
-  verifiedBadgeIcon: {
-    color: Colors.success,
-    fontSize: FontSize.xs,
-    fontWeight: '800',
-    marginRight: 6,
-  },
   verifiedBadgeText: {
     color: Colors.success,
     fontSize: FontSize.xs,
@@ -952,10 +1203,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  unverifiedBadgeIcon: {
-    fontSize: FontSize.xs,
-    marginRight: 6,
-  },
   unverifiedBadgeText: {
     color: Colors.textSecondary,
     fontSize: FontSize.xs,
@@ -966,14 +1213,132 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.md,
   },
+  callTypeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   callTypeLabel: {
     fontSize: FontSize.sm,
     fontWeight: '700',
   },
 
-  // Info card
+  // Pipeline stages card
+  pipelineCard: {
+    backgroundColor: Colors.surface,
+    padding: Spacing.lg,
+  },
+  pipelineHeader: {
+    marginBottom: Spacing.lg,
+  },
+  pipelineTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.xs,
+  },
+  pipelineTitleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pipelineTitle: {
+    fontSize: FontSize.base,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+  },
+  pipelineSubtitle: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  pipelineStatusBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+  },
+  badgeCompleted: {backgroundColor: Colors.successLight},
+  badgeProcessing: {backgroundColor: Colors.primaryLight},
+  badgeFailed: {backgroundColor: Colors.errorLight},
+  badgePending: {backgroundColor: Colors.surfaceSecondary},
+  pipelineStatusBadgeText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+  },
+  textCompleted: {color: Colors.success},
+  textProcessing: {color: Colors.primary},
+  textFailed: {color: Colors.error},
+  textPending: {color: Colors.textTertiary},
+
+  // Stepper
+  stepperContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.lg,
+  },
+  stepperLine: {
+    flex: 1,
+    height: 3,
+    borderRadius: 1.5,
+  },
+  stepperLineDone: {backgroundColor: Colors.primary},
+  stepperLineActive: {backgroundColor: Colors.primaryLight},
+  stepperLinePending: {backgroundColor: Colors.border},
+  stepNodeWrapper: {
+    alignItems: 'center',
+    width: 52,
+  },
+  stepNode: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  stepNodeDone: {
+    backgroundColor: Colors.primary,
+  },
+  stepNodeActive: {
+    backgroundColor: Colors.primary,
+    borderWidth: 2,
+    borderColor: Colors.primaryLight,
+  },
+  stepNodePending: {
+    backgroundColor: Colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  stepLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  stepLabelDone: {color: Colors.primary, fontWeight: '700'},
+  stepLabelActive: {color: Colors.primary, fontWeight: '800'},
+  stepLabelPending: {color: Colors.textTertiary},
+
+  pipelineRunBtn: {
+    flexDirection: 'row',
+    backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...(Shadow.md as object),
+  },
+  pipelineRunBtnDisabled: {
+    opacity: 0.6,
+  },
+  pipelineRunBtnText: {
+    color: Colors.textInverse,
+    fontWeight: '700',
+    fontSize: FontSize.base,
+  },
+
+  // Info Card
   infoCard: {
-    gap: 0,
+    padding: Spacing.lg,
   },
   cardTitle: {
     fontSize: FontSize.base,
@@ -984,13 +1349,12 @@ const styles = StyleSheet.create({
   infoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: Spacing.sm,
+    paddingVertical: Spacing.xs,
   },
-  infoIcon: {
-    fontSize: 18,
-    marginRight: Spacing.md,
-    width: 28,
-    textAlign: 'center',
+  infoIconWrapper: {
+    width: 32,
+    alignItems: 'center',
+    marginRight: Spacing.sm,
   },
   infoContent: {
     flex: 1,
@@ -1004,20 +1368,19 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   infoValue: {
-    fontSize: FontSize.base,
+    fontSize: FontSize.sm,
     color: Colors.textPrimary,
     fontWeight: '600',
+    maxWidth: '60%',
     textAlign: 'right',
-    flex: 1,
-    marginLeft: Spacing.md,
   },
   infoSeparator: {
     height: 1,
-    backgroundColor: Colors.border,
+    backgroundColor: Colors.borderLight,
+    marginVertical: 4,
   },
 
-
-  // Transcript preview
+  // Transcript Preview
   transcriptPreview: {
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
@@ -1026,57 +1389,80 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   viewTranscriptBtn: {
-    backgroundColor: Colors.surfaceSecondary,
-    borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.md,
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: Colors.primary,
+    alignSelf: 'flex-start',
+    paddingVertical: Spacing.xs,
   },
   viewTranscriptText: {
-    fontSize: FontSize.base,
+    fontSize: FontSize.sm,
     color: Colors.primary,
     fontWeight: '700',
   },
 
-  // Failed banner
-  failedBanner: {
-    backgroundColor: Colors.errorLight,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.base,
-    borderWidth: 1,
-    borderColor: Colors.error,
-  },
-  failedBannerTitle: {
-    fontSize: FontSize.base,
-    fontWeight: '700',
-    color: Colors.error,
-    marginBottom: Spacing.sm,
-  },
-  failedBannerText: {
-    fontSize: FontSize.sm,
-    color: Colors.error,
-    lineHeight: 20,
-  },
-
-  // Drive info
+  // Drive & Sheets
   driveHeaderRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: Spacing.sm,
+  },
+  driveCheckBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.successLight,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+  },
+  driveCheck: {
+    fontSize: FontSize.xs,
+    color: Colors.success,
+    fontWeight: '700',
+  },
+  drivePendingBadge: {
+    backgroundColor: Colors.surfaceSecondary,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+  },
+  drivePendingText: {
+    fontSize: FontSize.xs,
+    color: Colors.textTertiary,
+    fontWeight: '600',
+  },
+  sheetSyncingBadge: {
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+  },
+  sheetSyncingText: {
+    fontSize: FontSize.xs,
+    color: Colors.primary,
+    fontWeight: '700',
+  },
+  driveUploadedContent: {
+    gap: Spacing.md,
   },
   driveRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.md,
   },
-  driveIcon: {fontSize: 26},
+  driveIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   driveInfoCol: {
     flex: 1,
   },
   driveStatusTitle: {
-    fontSize: FontSize.base,
+    fontSize: FontSize.sm,
     fontWeight: '700',
     color: Colors.textPrimary,
   },
@@ -1085,293 +1471,363 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginTop: 2,
   },
-  driveCheckBadge: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.successLight,
-    borderWidth: 1,
-    borderColor: Colors.success,
-  },
-  driveCheck: {
-    color: Colors.success,
-    fontSize: FontSize.xs,
-    fontWeight: '700',
-  },
-  drivePendingBadge: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.warningLight,
-    borderWidth: 1,
-    borderColor: Colors.warning,
-  },
-  drivePendingText: {
-    color: Colors.warning,
-    fontSize: FontSize.xs,
-    fontWeight: '700',
-  },
-  driveUploadedContent: {
-    gap: Spacing.md,
-    marginTop: Spacing.xs,
-  },
   openDriveBtn: {
-    backgroundColor: Colors.primaryLight,
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.base,
-    borderRadius: BorderRadius.md,
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.primary,
+    justifyContent: 'center',
+    backgroundColor: Colors.primaryLight,
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
   },
   openDriveBtnText: {
-    color: Colors.primary,
     fontSize: FontSize.sm,
+    color: Colors.primary,
+    fontWeight: '700',
+  },
+  openSheetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ECFDF5',
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+  },
+  openSheetBtnText: {
+    fontSize: FontSize.sm,
+    color: '#059669',
     fontWeight: '700',
   },
   drivePendingContent: {
     gap: Spacing.md,
-    marginTop: Spacing.xs,
   },
   drivePendingDescription: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    lineHeight: 18,
-  },
-  uploadingBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    backgroundColor: Colors.surfaceSecondary,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  uploadingText: {
     fontSize: FontSize.sm,
-    color: Colors.primary,
-    fontWeight: '600',
+    color: Colors.textSecondary,
+    lineHeight: 20,
   },
   uploadDriveBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.sm,
     backgroundColor: Colors.primary,
-    paddingVertical: Spacing.md,
     borderRadius: BorderRadius.md,
-    ...(Shadow.sm as object),
-  },
-  uploadDriveBtnIcon: {
-    fontSize: 16,
-    color: Colors.textInverse,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
   },
   uploadDriveBtnText: {
     fontSize: FontSize.sm,
-    fontWeight: '700',
     color: Colors.textInverse,
+    fontWeight: '700',
+  },
+  uploadingBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.sm,
+  },
+  uploadingText: {
+    fontSize: FontSize.xs,
+    color: Colors.primary,
+    fontWeight: '600',
   },
 
-  // Google Sheets Card Styles (Phase 8)
-  sheetSyncingBadge: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.primaryLight,
-    borderWidth: 1,
-    borderColor: Colors.primary,
-  },
-  sheetSyncingText: {
-    color: Colors.primary,
-    fontSize: FontSize.xs,
-    fontWeight: '700',
-  },
-  openSheetBtn: {
-    backgroundColor: '#E8F5E9',
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.base,
+  // Failed banner
+  failedBanner: {
+    backgroundColor: Colors.errorLight,
     borderRadius: BorderRadius.md,
-    alignItems: 'center',
+    padding: Spacing.md,
     borderWidth: 1,
-    borderColor: '#2E7D32',
+    borderColor: Colors.error,
   },
-  openSheetBtnText: {
-    color: '#2E7D32',
+  failedBannerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  failedBannerTitle: {
     fontSize: FontSize.sm,
     fontWeight: '700',
+    color: Colors.error,
+  },
+  failedBannerText: {
+    fontSize: FontSize.xs,
+    color: Colors.error,
+    lineHeight: 18,
   },
 
   // Not found
   notFound: {
     flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
-    padding: Spacing.xl,
+    alignItems: 'center',
+    padding: Spacing['2xl'],
   },
   notFoundText: {
     fontSize: FontSize.lg,
     color: Colors.textSecondary,
+    marginTop: Spacing.md,
     marginBottom: Spacing.lg,
+  },
+  backLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
   },
   backLink: {
     fontSize: FontSize.base,
     color: Colors.primary,
-    fontWeight: '600',
+    fontWeight: '700',
   },
 
-  // Pipeline card styles (Phase 11)
-  pipelineCard: {
-    padding: Spacing.base,
-  },
-  pipelineHeader: {
-    marginBottom: Spacing.sm,
-  },
-  pipelineTitleRow: {
+  // Transcript Badge Button
+  viewTranscriptBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
+    alignSelf: 'flex-start',
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1.5,
+    borderColor: '#818CF8',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.full,
+    marginTop: Spacing.sm,
+    gap: 8,
+    elevation: 3,
+    shadowColor: '#4F46E5',
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
   },
-  pipelineTitle: {
-    fontSize: FontSize.base,
+  viewTranscriptBadgeText: {
+    fontSize: FontSize.xs,
+    color: '#3730A3',
     fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+
+  // Pending Actions
+  pendingActionsRow: {
+    gap: Spacing.sm,
+  },
+  openDriveOutlineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F0F7FF',
+    borderWidth: 1.5,
+    borderColor: '#93C5FD',
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+  },
+  openDriveOutlineBtnText: {
+    fontSize: FontSize.sm,
+    color: '#1D4ED8',
+    fontWeight: '700',
+  },
+  openSheetOutlineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1.5,
+    borderColor: '#6EE7B7',
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    marginTop: Spacing.xs,
+  },
+  openSheetOutlineBtnText: {
+    fontSize: FontSize.sm,
+    color: '#047857',
+    fontWeight: '700',
+  },
+  inlineControlsBtn: {
+    marginLeft: 'auto',
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  inlineControlsBtnText: {
+    fontSize: FontSize.xs,
+    color: Colors.primary,
+    fontWeight: '700',
+  },
+
+  // Floating Background Upload Indicator
+  floatingUploadBanner: {
+    position: 'absolute',
+    bottom: 24,
+    left: 16,
+    right: 16,
+    backgroundColor: '#0F172A',
+    borderRadius: BorderRadius.xl,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#38BDF8',
+    elevation: 16,
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 6},
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    zIndex: 999,
+  },
+  floatingUploadIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: '#1E293B',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  floatingUploadInfo: {
+    flex: 1,
+  },
+  floatingUploadTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.2,
+  },
+  floatingUploadSubtitle: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginTop: 2,
+  },
+  floatingUploadChevron: {
+    marginLeft: 8,
+  },
+
+  // Upload Progress & Control Modal
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  uploadModalCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius['2xl'],
+    padding: 24,
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 10},
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+  },
+  uploadModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  uploadModalIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  uploadModalTitleWrap: {
+    flex: 1,
+  },
+  uploadModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
     color: Colors.textPrimary,
   },
-  pipelineSubtitle: {
-    fontSize: FontSize.xs,
+  uploadModalSubtitle: {
+    fontSize: 13,
     color: Colors.textSecondary,
     marginTop: 2,
   },
-  pipelineStatusBadge: {
-    paddingHorizontal: Spacing.sm + 2,
-    paddingVertical: 3,
-    borderRadius: BorderRadius.full,
+  uploadModalCloseBtn: {
+    padding: 6,
+  },
+  uploadProgressBarTrack: {
+    height: 12,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 6,
+    overflow: 'hidden',
     borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
-  badgeCompleted: {
-    backgroundColor: Colors.successLight,
-    borderColor: Colors.success,
+  uploadProgressBarFill: {
+    height: '100%',
+    borderRadius: 6,
   },
-  badgeProcessing: {
-    backgroundColor: Colors.primaryLight,
-    borderColor: Colors.primary,
-  },
-  badgeFailed: {
-    backgroundColor: Colors.errorLight,
-    borderColor: Colors.error,
-  },
-  badgePending: {
-    backgroundColor: Colors.warningLight,
-    borderColor: Colors.warning,
-  },
-  pipelineStatusBadgeText: {
-    fontSize: FontSize.xs,
-    fontWeight: '700',
-  },
-  textCompleted: {
-    color: Colors.success,
-  },
-  textProcessing: {
-    color: Colors.primary,
-  },
-  textFailed: {
-    color: Colors.error,
-  },
-  textPending: {
-    color: Colors.warning,
-  },
-  stepperContainer: {
+  uploadProgressInfoRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.xs,
-    marginVertical: Spacing.xs,
-  },
-  stepperLine: {
-    flex: 1,
-    height: 3,
-    marginHorizontal: 2,
-    marginBottom: 16,
-    borderRadius: 2,
-  },
-  stepperLineDone: {
-    backgroundColor: Colors.success,
-  },
-  stepperLineActive: {
-    backgroundColor: Colors.primary,
-  },
-  stepperLinePending: {
-    backgroundColor: Colors.border,
-  },
-  stepNodeWrapper: {
     alignItems: 'center',
-    width: 52,
+    marginTop: 10,
+    marginBottom: 20,
   },
-  stepNode: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-  },
-  stepNodeDone: {
-    backgroundColor: '#E8F5E9',
-    borderColor: Colors.success,
-  },
-  stepNodeActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  stepNodePending: {
-    backgroundColor: Colors.surfaceSecondary,
-    borderColor: Colors.border,
-  },
-  stepIcon: {
-    fontSize: 16,
-  },
-  stepLabel: {
-    fontSize: 10,
+  uploadProgressStatus: {
+    fontSize: 13,
+    color: Colors.textSecondary,
     fontWeight: '600',
-    marginTop: 4,
-    textAlign: 'center',
   },
-  stepLabelDone: {
-    color: Colors.success,
-    fontWeight: '700',
-  },
-  stepLabelActive: {
+  uploadProgressPercent: {
+    fontSize: 14,
+    fontWeight: '800',
     color: Colors.primary,
-    fontWeight: '700',
   },
-  stepLabelPending: {
-    color: Colors.textTertiary,
+  uploadModalActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
   },
-  pipelineRunBtn: {
+  uploadModalActionBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.sm,
+    paddingVertical: 12,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1.5,
+  },
+  uploadPauseBtn: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#CBD5E1',
+  },
+  uploadResumeBtn: {
     backgroundColor: Colors.primary,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
-    marginTop: Spacing.sm,
-    ...(Shadow.sm as object),
+    borderColor: Colors.primary,
   },
-  pipelineRunBtnDisabled: {
-    opacity: 0.75,
+  uploadCancelBtn: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
   },
-  pipelineRunBtnIcon: {
-    fontSize: 16,
-    color: Colors.textInverse,
-  },
-  pipelineRunBtnText: {
-    fontSize: FontSize.sm,
+  uploadModalActionText: {
+    fontSize: 14,
     fontWeight: '700',
-    color: Colors.textInverse,
+  },
+  uploadBackgroundLink: {
+    alignItems: 'center',
+    marginTop: 16,
+    paddingVertical: 6,
+  },
+  uploadBackgroundLinkText: {
+    fontSize: 13,
+    color: Colors.textTertiary,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 });
 

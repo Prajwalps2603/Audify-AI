@@ -1,4 +1,4 @@
-package com.telecallerai
+package com.audifyai
 
 import android.app.Application
 import com.facebook.react.PackageList
